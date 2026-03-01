@@ -8,7 +8,7 @@ PORT="${1:-5050}"
 
 echo ""
 echo "  ╔══════════════════════════════════════════════╗"
-echo "  ║  ATLAS – Literature Discovery                ║"
+echo "  ║  ATLAS - Literature Discovery                ║"
 echo "  ║  Starting on http://127.0.0.1:${PORT}          ║"
 echo "  ╚══════════════════════════════════════════════╝"
 echo ""

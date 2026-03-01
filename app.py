@@ -687,7 +687,7 @@ def _open_browser():
 
 if __name__ == "__main__":
     print(f"\n  ╔══════════════════════════════════════╗")
-    print(f"  ║   ATLAS – Literature Discovery App   ║")
+    print(f"  ║   ATLAS - Literature Discovery App   ║")
     print(f"  ║   http://{HOST}:{PORT}              ║")
     print(f"  ╚══════════════════════════════════════╝\n")
     t = threading.Thread(target=_open_browser, daemon=True)
