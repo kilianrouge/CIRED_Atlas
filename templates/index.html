@@ -1,0 +1,909 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ATLAS – Literature Discovery</title>
+  <link rel="icon" type="image/png" href="/static/star.png">
+  <link rel="stylesheet" href="/static/css/atlas.css">
+  <script defer src="https://unpkg.com/alpinejs@3.x.x/dist/cdn.min.js"></script>
+</head>
+<body>
+<div id="app" x-data="atlasApp()" x-init="init()">
+
+  <!-- SVG symbol sprite (hidden) -->
+  <svg style="display:none">
+    <defs>
+      <symbol id="i-search" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></symbol>
+      <symbol id="i-history" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></symbol>
+      <symbol id="i-settings" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></symbol>
+      <symbol id="i-plus" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></symbol>
+      <symbol id="i-trash" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6M10 11v6M14 11v6M9 6V4h6v2"/></symbol>
+      <symbol id="i-edit" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></symbol>
+      <symbol id="i-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></symbol>
+      <symbol id="i-x" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></symbol>
+      <symbol id="i-chevdown" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></symbol>
+      <symbol id="i-chevup" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="18 15 12 9 6 15"/></symbol>
+      <symbol id="i-play" viewBox="0 0 24 24" fill="currentColor" stroke="none"><polygon points="5 3 19 12 5 21 5 3"/></symbol>
+      <symbol id="i-file" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></symbol>
+      <symbol id="i-link" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></symbol>
+      <symbol id="i-copy" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></symbol>
+      <symbol id="i-refresh" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></symbol>
+      <symbol id="i-layers" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 2 7 12 12 22 7 12 2"/><polyline points="2 17 12 22 22 17"/><polyline points="2 12 12 17 22 12"/></symbol>
+      <symbol id="i-tag" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"/><line x1="7" y1="7" x2="7.01" y2="7"/></symbol>
+      <symbol id="i-books" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></symbol>
+      <symbol id="i-user" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></symbol>
+      <symbol id="i-journal" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></symbol>
+      <symbol id="i-skip" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></symbol>
+      <symbol id="i-zotero" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M7 17l10-10M7 7h10v4M7 17h10v-4"/></symbol>
+    </defs>
+  </svg>
+
+  <!-- SIDEBAR -->
+  <div id="sidebar">
+    <div id="sidebar-logo">
+      <div class="logo-icon"><img src="/static/star.png" width="28" height="28" alt="ATLAS" style="display:block"></div>
+      <div class="logo-text">
+        <div class="logo-title">ATLAS</div>
+        <div class="logo-sub">CIRED · Literature Discovery</div>
+      </div>
+    </div>
+
+    <div id="nav-tabs">
+      <button class="nav-tab" :class="{active: panel==='search'}" @click="panel='search'">
+        <svg class="tab-icon" width="15" height="15"><use href="#i-search"/></svg> Current Search
+      </button>
+      <button class="nav-tab" :class="{active: panel==='history'}" @click="panel='history'; loadHistory()">
+        <svg class="tab-icon" width="15" height="15"><use href="#i-history"/></svg> Past Searches
+      </button>
+      <button class="nav-tab" :class="{active: panel==='settings'}" @click="panel='settings'; loadSettings()">
+        <svg class="tab-icon" width="15" height="15"><use href="#i-settings"/></svg> Settings
+      </button>
+    </div>
+
+    <div id="profile-list-wrap" x-show="panel==='search'">
+      <div id="profile-list-label">
+        Search Profiles
+        <span x-show="selectedProfileIds.length" class="profile-count-badge"
+              x-text="selectedProfileIds.length + ' selected'"></span>
+      </div>
+      <template x-for="p in profiles" :key="p.id">
+        <div class="profile-item" :class="{editing: activeProfileId===p.id, selected: selectedProfileIds.includes(p.id)}">
+          <input type="checkbox" class="profile-check"
+                 :checked="selectedProfileIds.includes(p.id)"
+                 @change="toggleProfileSelection(p.id)" title="Include in next run">
+          <span class="profile-name" @click="setActiveProfile(p)" x-text="p.name"></span>
+          <span class="profile-run-dot" x-show="runningProfileIds.includes(p.id)" title="Currently running"></span>
+        </div>
+      </template>
+      <button class="profile-add-btn" @click="openNewProfileModal()">
+        <svg width="12" height="12"><use href="#i-plus"/></svg> New profile
+      </button>
+    </div>
+
+    <div id="sidebar-credits">
+      Kilian Rouge · 2026<br>
+      <span style="opacity:.6">Version 1.0</span>
+    </div>
+  </div>
+
+  <!-- MAIN CONTENT -->
+  <div id="main">
+    <div id="topbar">
+      <h1 x-text="topbarTitle()"></h1>
+      <div class="topbar-actions">
+        <template x-if="panel==='search' && activeProfile">
+          <button class="btn btn-ghost btn-sm" @click="openEditProfileModal()">
+            <svg width="13" height="13"><use href="#i-edit"/></svg> Edit
+          </button>
+        </template>
+        <template x-if="panel==='search' && activeProfile">
+          <button class="btn btn-danger btn-sm" @click="deleteProfile()">
+            <svg width="13" height="13"><use href="#i-trash"/></svg> Delete
+          </button>
+        </template>
+      </div>
+    </div>
+
+    <div id="content">
+      <!-- ── SEARCH PANEL ────── -->
+      <div x-show="panel==='search'">
+
+        <div x-show="profiles.length===0" class="empty-state">
+          <svg width="42" height="42" style="opacity:.25;margin-bottom:12px"><use href="#i-file"/></svg>
+          <h3>No search profiles yet</h3>
+          <p class="text-muted">Create a profile to start discovering literature.</p>
+          <button class="btn btn-primary mt-3" @click="openNewProfileModal()">
+            <svg width="14" height="14"><use href="#i-plus"/></svg> Create Profile
+          </button>
+        </div>
+
+        <div x-show="profiles.length > 0">
+
+          <div x-show="!activeProfile" class="card" style="text-align:center;padding:32px;color:var(--text-3)">
+            <svg width="36" height="36" style="opacity:.2;margin-bottom:10px"><use href="#i-file"/></svg>
+            <p>Select a profile from the sidebar to edit its conditions,<br>or check one or more to run them.</p>
+          </div>
+
+          <!-- Conditions editor -->
+          <div x-show="activeProfile" class="card">
+            <div class="card-title">
+              Conditions
+              <span style="font-weight:400;font-size:12px;color:var(--text-3);text-transform:none;letter-spacing:0;margin-left:6px"
+                    x-text="activeProfile ? '— ' + activeProfile.name + ' (' + (activeProfile.combinator||'OR') + ')' : ''"></span>
+            </div>
+
+            <div id="conditions-list">
+              <template x-for="(cond, idx) in editConditions" :key="cond._id">
+                <div class="condition-row">
+                  <select class="form-input form-select condition-type-select"
+                          x-model="cond.type" @change="onCondTypeChange(cond)">
+                    <optgroup label="Text search">
+                      <option value="keywords_title_abstract">Keywords — title &amp; abstract</option>
+                      <option value="keywords_title">Keywords — title only</option>
+                      <option value="keywords_abstract">Keywords — abstract only</option>
+                    </optgroup>
+                    <optgroup label="Entity (autocomplete)">
+                      <option value="author">Author</option>
+                      <option value="journal">Journal / Source</option>
+                    </optgroup>
+                    <optgroup label="Classification">
+                      <option value="field">Field</option>
+                      <option value="domain">Domain</option>
+                    </optgroup>
+                    <optgroup label="Library-based">
+                      <option value="citing_library">Papers citing my library</option>
+                      <option value="author_in_library">Prolific authors in library</option>
+                    </optgroup>
+                  </select>
+
+                  <div class="condition-value-wrap">
+                    <template x-if="['keywords_title_abstract','keywords_title','keywords_abstract'].includes(cond.type)">
+                      <div>
+                        <input class="form-input" placeholder='e.g. "post-growth" OR degrowth' x-model="cond.value">
+                        <div style="display:flex;gap:6px;margin-top:5px">
+                          <input class="form-input" style="flex:1;font-size:11px;padding:4px 8px"
+                                 placeholder="Label (optional)" x-model="cond.label">
+                          <input class="form-input" style="flex:2;font-size:11px;padding:4px 8px"
+                                 placeholder="Exclude title words (comma-sep.)" x-model="cond._excludeRaw">
+                        </div>
+                        <div class="form-hint mt-1">Wrap phrases in "quotes" · AND/OR · wildcard *</div>
+                      </div>
+                    </template>
+
+                    <template x-if="cond.type === 'author'">
+                      <div class="autocomplete-wrap">
+                        <input class="form-input" placeholder="Author name…"
+                               x-model="cond._display"
+                               @input.debounce.350ms="autocomplete('authors', cond, $event.target.value)"
+                               @focus="cond._acOpen=true" @blur.debounce.200ms="cond._acOpen=false">
+                        <div class="autocomplete-dropdown" x-show="cond._acOpen && (cond._acItems||[]).length">
+                          <template x-for="item in cond._acItems||[]" :key="item.id">
+                            <div class="autocomplete-item" @mousedown.prevent="selectAcItem(cond,item)">
+                              <div class="ac-name" x-text="item.display_name"></div>
+                              <div class="ac-hint" x-text="item.hint"></div>
+                            </div>
+                          </template>
+                        </div>
+                      </div>
+                    </template>
+
+                    <template x-if="cond.type === 'journal'">
+                      <div class="autocomplete-wrap">
+                        <input class="form-input" placeholder="Journal or source name…"
+                               x-model="cond._display"
+                               @input.debounce.350ms="autocomplete('sources', cond, $event.target.value)"
+                               @focus="cond._acOpen=true" @blur.debounce.200ms="cond._acOpen=false">
+                        <div class="autocomplete-dropdown" x-show="cond._acOpen && (cond._acItems||[]).length">
+                          <template x-for="item in cond._acItems||[]" :key="item.id">
+                            <div class="autocomplete-item" @mousedown.prevent="selectAcItem(cond,item)">
+                              <div class="ac-name" x-text="item.display_name"></div>
+                              <div class="ac-hint" x-text="item.hint || (item.issn||[]).join(', ')"></div>
+                            </div>
+                          </template>
+                        </div>
+                      </div>
+                    </template>
+
+                    <template x-if="cond.type === 'field'">
+                      <div>
+                        <select class="form-input form-select" x-model="cond.value">
+                          <option value="">— select a field —</option>
+                          <option value="fields/20">Economics, Econometrics and Finance</option>
+                          <option value="fields/14">Business, Management and Accounting</option>
+                          <option value="fields/33">Social Sciences (broad)</option>
+                          <option value="fields/23">Environmental Science</option>
+                          <option value="fields/22">Engineering</option>
+                          <option value="fields/17">Computer Science</option>
+                          <option value="fields/02">Arts and Humanities</option>
+                          <option value="fields/32">Political Science</option>
+                          <option value="fields/12">Agricultural and Biological Sciences</option>
+                          <option value="fields/19">Earth and Planetary Sciences</option>
+                          <option value="fields/25">Materials Science</option>
+                          <option value="fields/13">Biochemistry, Genetics and Molecular Biology</option>
+                        </select>
+                        <input class="form-input mt-1" style="font-size:11px;padding:4px 8px"
+                               placeholder="Label (optional)" x-model="cond.label">
+                      </div>
+                    </template>
+
+                    <template x-if="cond.type === 'domain'">
+                      <div>
+                        <select class="form-input form-select" x-model="cond.value">
+                          <option value="">— select a domain —</option>
+                          <option value="domains/1">Physical Sciences</option>
+                          <option value="domains/2">Social Sciences</option>
+                          <option value="domains/3">Life Sciences</option>
+                          <option value="domains/4">Health Sciences</option>
+                        </select>
+                        <input class="form-input mt-1" style="font-size:11px;padding:4px 8px"
+                               placeholder="Label (optional)" x-model="cond.label">
+                      </div>
+                    </template>
+
+                    <template x-if="cond.type === 'citing_library'">
+                      <p class="text-muted text-sm" style="padding:7px 0">
+                        Finds all recent papers that cite any work in your working collection.
+                      </p>
+                    </template>
+
+                    <template x-if="cond.type === 'author_in_library'">
+                      <div style="display:flex;align-items:center;gap:8px;padding:4px 0">
+                        <label class="form-label" style="white-space:nowrap">Min. papers in collection:</label>
+                        <input type="number" class="form-input" style="width:68px"
+                               min="1" max="20" x-model.number="cond.min_papers">
+                      </div>
+                    </template>
+                  </div>
+
+                  <button class="condition-remove-btn" @click="removeCondition(idx)" title="Remove condition">
+                    <svg width="14" height="14"><use href="#i-x"/></svg>
+                  </button>
+                </div>
+              </template>
+            </div>
+
+            <div style="display:flex;gap:8px;margin-top:10px;align-items:center;flex-wrap:wrap">
+              <button class="btn btn-secondary btn-sm" @click="addCondition()">
+                <svg width="12" height="12"><use href="#i-plus"/></svg> Add condition
+              </button>
+              <select class="form-input form-select" style="width:148px;padding:5px 28px 5px 8px;font-size:12px"
+                      x-model="editCombinator">
+                <option value="OR">Combine as OR</option>
+                <option value="AND">Combine as AND</option>
+              </select>
+              <button class="btn btn-ghost btn-sm" @click="importConditionsModal()" title="Paste JSON conditions (from AI)">
+                <svg width="12" height="12"><use href="#i-copy"/></svg> Import JSON
+              </button>
+              <button class="btn btn-ghost btn-sm" @click="exportConditions()" x-show="editConditions.length" title="Copy conditions as JSON">
+                <svg width="12" height="12"><use href="#i-layers"/></svg> Export JSON
+              </button>
+              <button class="btn btn-ghost btn-sm" @click="saveConditions()" x-show="conditionsChanged">
+                Save conditions
+              </button>
+            </div>
+          </div>
+
+          <!-- Run controls -->
+          <div class="card">
+            <div class="card-title">Run Parameters</div>
+
+            <div x-show="selectedProfileIds.length" class="selected-profiles-bar mb-2">
+              <span class="text-sm" style="color:var(--text-2)">Will run:</span>
+              <template x-for="pid in selectedProfileIds" :key="pid">
+                <span class="profile-run-chip" x-text="profiles.find(p=>p.id===pid)?.name || pid"></span>
+              </template>
+            </div>
+            <div x-show="!selectedProfileIds.length" class="text-sm text-muted mb-2"
+                 style="padding:6px 0;border-bottom:1px solid var(--border)">
+              Check profiles in the sidebar to include them in the run.
+            </div>
+
+            <div id="run-controls">
+              <div style="flex:0 0 200px">
+                <div class="form-label">Timeframe</div>
+                <select class="form-input form-select" x-model="runTimeframe">
+                  <option value="since_last_run">Since last run</option>
+                  <option value="last_week">Last 7 days</option>
+                  <option value="last_2_weeks">Last 2 weeks</option>
+                  <option value="last_month">Last month</option>
+                  <option value="last_2_months">Last 2 months</option>
+                  <option value="last_year">Last year</option>
+                </select>
+              </div>
+
+              <div style="flex:1;min-width:200px">
+                <div class="form-label" style="display:flex;justify-content:space-between">
+                  <span>Similarity weighting</span>
+                  <span style="font-weight:600;color:var(--blue-700)"
+                        x-text="'Library ' + Math.round((1-weightArbitration)*100) + '% / Feedback ' + Math.round(weightArbitration*100) + '%'"></span>
+                </div>
+                <div style="padding:8px 0">
+                  <input type="range" min="0" max="1" step="0.05" x-model.number="weightArbitration" style="width:100%">
+                  <div style="display:flex;justify-content:space-between;font-size:10px;color:var(--text-3);margin-top:2px">
+                    <span>Library similarity</span>
+                    <span>Feedback learning</span>
+                  </div>
+                </div>
+              </div>
+
+              <div style="display:flex;flex-direction:column;gap:6px">
+                <button class="btn btn-primary" @click="startRun()"
+                        :disabled="runQueue.some(r=>r.status==='running') || !selectedProfileIds.length"
+                        style="min-width:130px">
+                  <template x-if="runQueue.some(r=>r.status==='running')">
+                    <span style="display:flex;align-items:center;gap:6px">
+                      <span class="spinner"></span> Running…
+                    </span>
+                  </template>
+                  <template x-if="!runQueue.some(r=>r.status==='running')">
+                    <span style="display:flex;align-items:center;gap:6px">
+                      <svg width="12" height="12"><use href="#i-play"/></svg>
+                      Run
+                      <span x-show="selectedProfileIds.length > 1"
+                            x-text="selectedProfileIds.length + ' profiles'"></span>
+                      <span x-show="selectedProfileIds.length === 1">search</span>
+                    </span>
+                  </template>
+                </button>
+              </div>
+            </div>
+
+            <div x-show="runQueue.length" class="mt-2" style="display:flex;flex-direction:column;gap:7px">
+              <template x-for="run in runQueue" :key="run.run_id">
+                <div>
+                  <div style="display:flex;align-items:center;gap:10px;font-size:12px;margin-bottom:3px">
+                    <span style="flex:0 0 150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--text-2);font-weight:600"
+                          x-text="run.profile_name"></span>
+                    <span class="text-muted" style="flex:1;font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"
+                          x-text="run.status==='running' ? ((run.progress_step||'Running…').split('\n')[1]||'') : ''"></span>
+                    <span class="badge"
+                          :class="run.status==='done'?'badge-green':run.status==='error'?'badge-red':'badge-blue'"
+                          x-text="run.status==='done'?(run.n_results||0)+' results':run.status==='error'?'error':(run.progress_step||'…').split('\n')[0]"></span>
+                  </div>
+                  <div class="progress-bar-wrap">
+                    <div class="progress-bar-inner"
+                         :class="run.status==='done'?'done':run.status==='error'?'err':''"
+                         :style="'width:'+Math.max(4,run.status==='done'?100:(run.progress_pct||4))+'%'"></div>
+                  </div>
+                </div>
+              </template>
+            </div>
+          </div>
+
+          <!-- Batch actions -->
+          <div x-show="results.length" class="card" style="padding:10px 16px">
+            <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+              <span class="text-sm text-muted"
+                    x-text="results.length + ' papers · ' + pendingCount + ' pending · ' + results.filter(r=>r.status==='accepted').length + ' accepted'"></span>
+              <div class="ml-auto" style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+                <button class="btn btn-success btn-sm" @click="batchDecide('accepted',true)"
+                        x-show="selectedResultIds.length"
+                        x-text="'Accept '+selectedResultIds.length+' → Zotero'"></button>
+                <button class="btn btn-danger btn-sm" @click="batchDecide('rejected',false)"
+                        x-show="selectedResultIds.length"
+                        x-text="'Reject '+selectedResultIds.length"></button>
+                <button class="btn btn-ghost btn-sm" @click="toggleSelectAll()">
+                  <svg width="12" height="12"><use href="#i-check"/></svg>
+                  <span x-text="selectedResultIds.length===pendingResults.length && pendingResults.length>0?'Deselect all':'Select all pending'"></span>
+                </button>
+                <select class="form-input form-select"
+                        style="padding:4px 24px 4px 8px;font-size:12px;width:auto" x-model="resultSort">
+                  <option value="score">Sort: Score</option>
+                  <option value="year_desc">Year ↓</option>
+                  <option value="year_asc">Year ↑</option>
+                  <option value="citations">Citations</option>
+                </select>
+              </div>
+            </div>
+          </div>
+
+          <!-- Result cards -->
+          <template x-for="r in sortedResults" :key="r.id">
+            <div class="result-card" :class="r.status">
+              <div class="result-header" @click="r._expanded = !r._expanded">
+                <div class="result-score">
+                  <div class="score-ring" :style="'--pct:'+Math.round((r.combined_score||0)*100)">
+                    <span x-text="Math.round((r.combined_score||0)*100)"></span>
+                  </div>
+                  <div class="score-label">score</div>
+                </div>
+                <div class="result-body">
+                  <div style="display:flex;align-items:flex-start;gap:8px">
+                    <input type="checkbox" class="result-checkbox"
+                           :checked="selectedResultIds.includes(r.id)"
+                           @click.stop="toggleResultSelect(r.id)"
+                           x-show="r.status==='pending'">
+                    <div style="flex:1;min-width:0">
+                      <div class="result-title">
+                        <a :href="r.doi?'https://doi.org/'+r.doi:'https://openalex.org/'+r.paper_oa_id"
+                           target="_blank" @click.stop x-text="r.title||'(no title)'"></a>
+                      </div>
+                      <div class="result-meta">
+                        <span x-text="r.year||'?'"></span>
+                        <span x-show="r.venue" class="meta-sep">·</span>
+                        <span x-show="r.venue" x-text="r.venue" class="result-venue"></span>
+                        <span class="meta-sep">·</span>
+                        <span x-text="formatAuthors(r.authors, 3)"></span>
+                        <template x-if="r.cited_by_count">
+                          <span>
+                            <span class="meta-sep">·</span>
+                            <svg width="10" height="10" style="vertical-align:-1px;opacity:.5"><use href="#i-layers"/></svg>
+                            <span x-text="r.cited_by_count + ' cit.'"></span>
+                          </span>
+                        </template>
+                      </div>
+                      <div class="reason-chips" x-show="(r.match_reasons||[]).length || r._profile_name">
+                        <template x-for="reason in (r.match_reasons||[])" :key="reason">
+                          <span class="reason-chip" x-text="reason"></span>
+                        </template>
+                        <span class="reason-chip profile-chip" x-show="r._profile_name" x-text="r._profile_name"></span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+                <div style="display:flex;flex-direction:column;align-items:flex-end;gap:6px;flex-shrink:0">
+                  <span class="badge badge-green" x-show="r.status==='accepted'">Accepted</span>
+                  <span class="badge badge-red"   x-show="r.status==='rejected'">Rejected</span>
+                  <span class="badge badge-gray"  x-show="r.status==='skipped'">Skipped</span>
+                  <span class="badge badge-blue"  x-show="r.status==='pending'">Pending</span>
+                  <svg width="14" height="14" style="color:var(--text-3)">
+                    <use :href="r._expanded?'#i-chevup':'#i-chevdown'"/>
+                  </svg>
+                </div>
+              </div>
+
+              <!-- Expanded panel -->
+              <div class="result-detail" x-show="r._expanded" x-transition:enter.duration.150ms>
+
+                <!-- Score breakdown -->
+                <div class="score-bars">
+                  <div class="score-bar-row">
+                    <span class="score-bar-label">Library</span>
+                    <div class="score-bar-track">
+                      <div class="score-bar-fill library" :style="'width:'+Math.round((r.score_library||0)*100)+'%'"></div>
+                    </div>
+                    <span class="score-bar-val" x-text="Math.round((r.score_library||0)*100)+'%'"></span>
+                  </div>
+                  <div class="score-bar-row">
+                    <span class="score-bar-label">Feedback</span>
+                    <div class="score-bar-track">
+                      <div class="score-bar-fill feedback" :style="'width:'+Math.round((r.score_feedback||0)*100)+'%'"></div>
+                    </div>
+                    <span class="score-bar-val" x-text="Math.round((r.score_feedback||0)*100)+'%'"></span>
+                  </div>
+                  <div class="score-bar-row" style="border-top:1px solid var(--border);padding-top:4px;margin-top:2px">
+                    <span class="score-bar-label" style="font-weight:700;color:var(--text)">Combined</span>
+                    <div class="score-bar-track">
+                      <div class="score-bar-fill combined" :style="'width:'+Math.round((r.combined_score||0)*100)+'%'"></div>
+                    </div>
+                    <span class="score-bar-val" style="font-weight:700;color:var(--blue-800)"
+                          x-text="Math.round((r.combined_score||0)*100)+'%'"></span>
+                  </div>
+                </div>
+
+                <!-- Full authors -->
+                <div class="detail-row" x-show="(r.authors||[]).length">
+                  <span class="detail-key">
+                    <svg width="11" height="11"><use href="#i-user"/></svg> Authors
+                  </span>
+                  <span class="detail-val" x-text="formatAuthors(r.authors, 99)"></span>
+                </div>
+
+                <!-- Venue + year -->
+                <div class="detail-row" x-show="r.venue">
+                  <span class="detail-key">
+                    <svg width="11" height="11"><use href="#i-journal"/></svg> Journal
+                  </span>
+                  <span class="detail-val" x-text="r.venue + (r.year ? ', ' + r.year : '')"></span>
+                </div>
+
+                <!-- Topics -->
+                <div class="detail-row" x-show="(r.topics||[]).length">
+                  <span class="detail-key">
+                    <svg width="11" height="11"><use href="#i-tag"/></svg> Topics
+                  </span>
+                  <div class="detail-val">
+                    <template x-for="t in (r.topics||[]).slice(0,8)" :key="t">
+                      <span class="topic-chip" x-text="t"></span>
+                    </template>
+                  </div>
+                </div>
+
+                <!-- Abstract -->
+                <div class="detail-abstract">
+                  <div class="detail-key" style="margin-bottom:5px">
+                    <svg width="11" height="11"><use href="#i-file"/></svg> Abstract
+                  </div>
+                  <template x-if="r.abstract">
+                    <p x-text="r.abstract" style="line-height:1.65;color:var(--text-2)"></p>
+                  </template>
+                  <template x-if="!r.abstract">
+                    <p class="text-muted"><em>No abstract available.</em></p>
+                  </template>
+                </div>
+
+                <!-- Links -->
+                <div class="detail-links">
+                  <a class="detail-link" x-show="r.doi"
+                     :href="'https://doi.org/' + r.doi" target="_blank">
+                    <svg width="11" height="11"><use href="#i-link"/></svg> Full text (DOI)
+                  </a>
+                  <a class="detail-link"
+                     :href="'https://openalex.org/' + r.paper_oa_id" target="_blank">
+                    <svg width="11" height="11"><use href="#i-link"/></svg> OpenAlex profile
+                  </a>
+                  <button class="detail-link" @click.stop="copyDoi(r.doi)" x-show="r.doi">
+                    <svg width="11" height="11"><use href="#i-copy"/></svg> Copy DOI
+                  </button>
+                </div>
+
+                <!-- Actions -->
+                <div class="result-actions">
+                  <template x-if="r.status==='pending'">
+                    <div style="display:flex;gap:6px;flex-wrap:wrap">
+                      <button class="btn btn-success btn-sm" @click.stop="decideSingle(r,'accepted',true)">
+                        <svg width="11" height="11"><use href="#i-zotero"/></svg> Accept + Zotero
+                      </button>
+                      <button class="btn btn-secondary btn-sm" @click.stop="decideSingle(r,'accepted',false)">
+                        <svg width="11" height="11"><use href="#i-check"/></svg> Accept only
+                      </button>
+                      <button class="btn btn-danger btn-sm" @click.stop="decideSingle(r,'rejected',false)">
+                        <svg width="11" height="11"><use href="#i-x"/></svg> Reject
+                      </button>
+                      <button class="btn btn-ghost btn-sm" @click.stop="decideSingle(r,'skipped',false)">
+                        <svg width="11" height="11"><use href="#i-skip"/></svg> Skip
+                      </button>
+                    </div>
+                  </template>
+                  <template x-if="r.status!=='pending'">
+                    <button class="btn btn-ghost btn-sm" @click.stop="addToZoteroRetro(r)">
+                      <svg width="11" height="11"><use href="#i-zotero"/></svg> Add to Zotero
+                    </button>
+                  </template>
+                </div>
+              </div>
+            </div>
+          </template>
+
+          <div x-show="results.length===0 && runQueue.every(r=>r.status==='done') && runQueue.length" class="empty-state">
+            <svg width="38" height="38" style="opacity:.22;margin-bottom:10px"><use href="#i-check"/></svg>
+            <h3>No new papers found</h3>
+            <p class="text-muted">All results are already in your library or try broader conditions.</p>
+          </div>
+          <div x-show="results.length===0 && !runQueue.length" class="empty-state">
+            <svg width="38" height="38" style="opacity:.18;margin-bottom:10px"><use href="#i-play"/></svg>
+            <h3>Ready to search</h3>
+            <p class="text-muted">Check profiles in the sidebar, configure conditions, then click <strong>Run search</strong>.</p>
+          </div>
+        </div>
+      </div>
+
+      <!-- ── HISTORY PANEL ────── -->
+      <div x-show="panel==='history'">
+        <div class="card" style="padding:0;overflow:hidden">
+          <div style="padding:14px 20px;border-bottom:1px solid var(--border);font-weight:700;font-size:13px;color:var(--blue-800)">SEARCH HISTORY</div>
+          <div x-show="!historyGroups.length" class="empty-state">
+            <svg width="38" height="38" style="opacity:.22;margin-bottom:10px"><use href="#i-history"/></svg>
+            <h3>No past searches</h3>
+          </div>
+          <template x-for="group in historyGroups" :key="group.group_id || group.runs[0]?.id">
+            <div>
+              <div class="run-row" @click="toggleHistoryGroup(group)">
+                <div class="run-info">
+                  <div class="run-name" x-text="group.runs.map(r=>r.profile_name||'Unnamed').join(' · ')"></div>
+                  <div class="run-sub" x-text="formatDate(group.runs[0]?.started_at) + ' · ' + (group.runs[0]?.timeframe||'')"></div>
+                </div>
+                <div class="run-stats">
+                  <span><strong x-text="group.runs.reduce((s,r)=>s+(r.n_results||0),0)"></strong> results</span>
+                  <span><strong x-text="group.runs.reduce((s,r)=>s+(r.n_candidates||0),0)"></strong> candidates</span>
+                </div>
+                <div style="display:flex;gap:3px;flex-wrap:wrap;align-items:center">
+                  <template x-for="run in group.runs" :key="run.id">
+                    <span class="badge"
+                          :class="run.status==='done'?'badge-green':run.status==='error'?'badge-red':'badge-amber'"
+                          x-text="group.runs.length > 1 ? (run.profile_name||'?') : run.status"></span>
+                  </template>
+                </div>
+                <button class="btn btn-ghost btn-sm" style="color:#dc2626;padding:2px 6px;flex-shrink:0"
+                        @click.stop="deleteHistoryGroup(group, $event)" title="Remove from history">
+                  <svg width="13" height="13"><use href="#i-trash"/></svg>
+                </button>
+                <svg width="14" height="14" style="color:var(--text-3);flex-shrink:0">
+                  <use :href="group._expanded?'#i-chevup':'#i-chevdown'"/>
+                </svg>
+              </div>
+              <div x-show="group._expanded" style="background:var(--bg);border-top:1px solid var(--border);padding:12px 16px">
+                <div x-show="!group._results" class="text-muted text-sm">Loading…</div>
+                <template x-if="group._results">
+                  <div>
+                    <div style="display:flex;justify-content:flex-end;margin-bottom:10px">
+                      <button class="btn btn-ghost btn-sm" @click.stop="addAllAcceptedToZotero(group)">
+                        <svg width="11" height="11"><use href="#i-zotero"/></svg> Push all accepted to Zotero
+                      </button>
+                    </div>
+                    <template x-for="r in group._results" :key="r.id">
+                      <div class="result-card" :class="r.status" style="margin-bottom:8px">
+                        <div class="result-header" @click="r._expanded=!r._expanded">
+                          <div class="result-score">
+                            <div class="score-ring" :style="'--pct:'+Math.round((r.combined_score||0)*100)">
+                              <span x-text="Math.round((r.combined_score||0)*100)"></span>
+                            </div>
+                          </div>
+                          <div class="result-body">
+                            <div class="result-title">
+                              <a :href="r.doi?'https://doi.org/'+r.doi:'#'" target="_blank" @click.stop
+                                 x-text="r.title||'(no title)'"></a>
+                            </div>
+                            <div class="result-meta">
+                              <span x-text="r.year||'?'"></span>
+                              <span x-show="r.venue" class="meta-sep">·</span>
+                              <span x-text="r.venue"></span>
+                            </div>
+                            <div class="reason-chips" x-show="(r.match_reasons||[]).length || (r._profile_name && group.runs.length > 1)">
+                              <template x-for="reason in (r.match_reasons||[])" :key="reason">
+                                <span class="reason-chip" x-text="reason"></span>
+                              </template>
+                              <span class="reason-chip profile-chip"
+                                    x-show="r._profile_name && group.runs.length > 1"
+                                    x-text="r._profile_name"></span>
+                            </div>
+                          </div>
+                          <span class="badge"
+                                :class="r.status==='accepted'?'badge-green':r.status==='rejected'?'badge-red':'badge-gray'"
+                                x-text="r.status"></span>
+                        </div>
+                        <div class="result-detail" x-show="r._expanded">
+                          <div class="detail-abstract" x-show="r.abstract">
+                            <p x-text="r.abstract" style="line-height:1.65;color:var(--text-2)"></p>
+                          </div>
+                          <div class="detail-row" x-show="(r.authors||[]).length">
+                            <span class="detail-key"><svg width="11" height="11"><use href="#i-user"/></svg> Authors</span>
+                            <span class="detail-val" x-text="formatAuthors(r.authors, 99)"></span>
+                          </div>
+                          <div class="detail-row" x-show="(r.topics||[]).length">
+                            <span class="detail-key"><svg width="11" height="11"><use href="#i-tag"/></svg> Topics</span>
+                            <div class="detail-val">
+                              <template x-for="t in (r.topics||[]).slice(0,6)" :key="t">
+                                <span class="topic-chip" x-text="t"></span>
+                              </template>
+                            </div>
+                          </div>
+                          <div class="result-actions">
+                            <button class="btn btn-success btn-sm" @click.stop="addToZoteroRetro(r)">
+                              <svg width="11" height="11"><use href="#i-zotero"/></svg> Add to Zotero
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    </template>
+                  </div>
+                </template>
+              </div>
+            </div>
+          </template>
+        </div>
+      </div>
+
+      <!-- ── SETTINGS PANEL ────── -->
+      <div x-show="panel==='settings'">
+        <div class="settings-section">
+          <div class="settings-section-header" @click="settingSections.zotero=!settingSections.zotero">
+            <svg width="14" height="14"><use href="#i-settings"/></svg> Zotero Credentials
+            <svg class="ml-auto" width="14" height="14"><use :href="settingSections.zotero?'#i-chevup':'#i-chevdown'"/></svg>
+          </div>
+          <div class="settings-section-body" x-show="settingSections.zotero">
+            <div class="settings-row">
+              <div class="form-group">
+                <label class="form-label">Library ID</label>
+                <input class="form-input" x-model="settings.zotero_library_id" placeholder="e.g. 10599298">
+                <div class="form-hint">Found at zotero.org → Settings → Feeds/API</div>
+              </div>
+              <div class="form-group">
+                <label class="form-label">API Key</label>
+                <input class="form-input" type="password" x-model="settings.zotero_api_key" placeholder="••••••••••">
+              </div>
+              <div class="form-group">
+                <label class="form-label">Library type</label>
+                <select class="form-input form-select" x-model="settings.zotero_library_type">
+                  <option value="user">User</option>
+                  <option value="group">Group</option>
+                </select>
+              </div>
+              <div class="form-group">
+                <label class="form-label">OpenAlex contact email</label>
+                <input class="form-input" type="email" x-model="settings.openalex_email" placeholder="you@institution.edu">
+                <div class="form-hint">Enables polite-pool (faster API)</div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="settings-section">
+          <div class="settings-section-header" @click="settingSections.collection=!settingSections.collection">
+            <svg width="14" height="14"><use href="#i-books"/></svg> Working Collection
+            <svg class="ml-auto" width="14" height="14"><use :href="settingSections.collection?'#i-chevup':'#i-chevdown'"/></svg>
+          </div>
+          <div class="settings-section-body" x-show="settingSections.collection">
+            <div class="form-group">
+              <label class="form-label">Working folder</label>
+              <div style="display:flex;gap:8px;margin-bottom:8px">
+                <button class="btn btn-secondary btn-sm" @click="loadZoteroCollections()">
+                  <svg width="12" height="12"><use href="#i-refresh"/></svg> Load from Zotero
+                </button>
+                <span class="text-muted text-sm" x-show="settings.default_collection_key"
+                      x-text="'Selected: ' + (flatCollections.find(c=>c.key===settings.default_collection_key)||{path:'?'}).path"></span>
+              </div>
+              <div class="col-tree" x-show="flatCollections.length">
+                <template x-for="col in flatCollections" :key="col.key">
+                  <div class="col-tree-node" :class="{selected: settings.default_collection_key===col.key}"
+                       @click="settings.default_collection_key=col.key"
+                       :style="'padding-left:'+((col.path||'').split(' / ').length-1)*14+8+'px'">
+                    <svg width="11" height="11"><use href="#i-books"/></svg>
+                    <span x-text="col.name"></span>
+                  </div>
+                </template>
+              </div>
+            </div>
+            <div class="settings-row">
+              <div class="form-group">
+                <label class="form-label">Inbox sub-collection name</label>
+                <input class="form-input" x-model="settings.default_inbox_subcollection" placeholder="ATLAS">
+                <div class="form-hint">Auto-created if absent</div>
+              </div>
+              <div class="form-group">
+                <label class="form-label">Default import tag</label>
+                <input class="form-input" x-model="settings.default_tag" placeholder="atlas-import">
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="settings-section">
+          <div class="settings-section-header" @click="settingSections.scoring=!settingSections.scoring">
+            <svg width="14" height="14"><use href="#i-layers"/></svg> Scoring Defaults
+            <svg class="ml-auto" width="14" height="14"><use :href="settingSections.scoring?'#i-chevup':'#i-chevdown'"/></svg>
+          </div>
+          <div class="settings-section-body" x-show="settingSections.scoring">
+            <div class="form-group">
+              <label class="form-label" style="display:flex;justify-content:space-between">
+                <span>Default weighting</span>
+                <span style="color:var(--blue-700);font-weight:600"
+                      x-text="'Library '+Math.round((1-(+settings.weight_arbitration||0))*100)+'% / Feedback '+Math.round((+settings.weight_arbitration||0)*100)+'%'"></span>
+              </label>
+              <input type="range" min="0" max="1" step="0.05" x-model.number="settings.weight_arbitration">
+              <div style="display:flex;justify-content:space-between;font-size:10px;color:var(--text-3)">
+                <span>Library similarity</span><span>Feedback learning</span>
+              </div>
+            </div>
+            <div class="settings-row">
+              <div class="form-group">
+                <label class="form-label">Min. score threshold (0 = show all)</label>
+                <input class="form-input" type="number" min="0" max="1" step="0.01"
+                       x-model.number="settings.similarity_threshold">
+              </div>
+              <div class="form-group">
+                <label class="form-label">Max results per condition</label>
+                <input class="form-input" type="number" min="10" max="500"
+                       x-model.number="settings.max_per_condition">
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div style="display:flex;justify-content:flex-end;gap:10px;margin-top:10px">
+          <button class="btn btn-ghost" @click="loadSettings()">Reset</button>
+          <button class="btn btn-primary" @click="saveSettings()">Save settings</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal: Import conditions JSON -->
+  <div class="modal-overlay" x-show="showImportModal" x-transition @click.self="showImportModal=false">
+    <div class="modal" style="max-width:620px" @click.stop>
+      <div class="modal-header">
+        <h2>Import Conditions from JSON</h2>
+        <button class="btn btn-icon btn-ghost" @click="showImportModal=false">
+          <svg width="15" height="15"><use href="#i-x"/></svg>
+        </button>
+      </div>
+      <div class="modal-body">
+        <p class="text-muted text-sm" style="margin-bottom:10px">
+          Paste a JSON array of condition objects. Each condition needs a <code>type</code> and usually a <code>value</code>.
+          You can ask an AI to generate this — share the schema below.
+        </p>
+        <details style="margin-bottom:10px">
+          <summary class="text-sm" style="cursor:pointer;color:var(--blue-700);font-weight:600">Show condition schema / AI prompt</summary>
+          <pre class="form-hint" style="margin-top:6px;padding:10px;background:var(--bg);border:1px solid var(--border);border-radius:6px;font-size:11px;white-space:pre-wrap;line-height:1.6">Generate a JSON array of search conditions for the ATLAS literature discovery tool.
+Each condition is an object with these fields:
+
+  type  (required) — one of:
+    "keywords_title_abstract"  full-text in title + abstract; value = query string (AND/OR/"phrases")
+    "keywords_title"           full-text in title only
+    "author"                   OpenAlex author ID (A…); _display = human name
+    "journal"                  OpenAlex source ID (S…); _display = journal name
+    "field"                    OpenAlex field ID; value = one of:
+                                 fields/20  Economics, Econometrics and Finance
+                                 fields/14  Business, Management and Accounting
+                                 fields/33  Social Sciences
+                                 fields/23  Environmental Science
+                                 fields/22  Engineering
+                                 fields/17  Computer Science
+                                 fields/02  Arts and Humanities
+                                 fields/32  Political Science
+                                 fields/12  Agricultural and Biological Sciences
+                                 fields/19  Earth and Planetary Sciences
+    "domain"                   OpenAlex domain; value = one of:
+                                 domains/1  Physical Sciences
+                                 domains/2  Social Sciences
+                                 domains/3  Life Sciences
+                                 domains/4  Health Sciences
+    "citing_library"           papers citing my Zotero collection (no value needed)
+                                 field / domain keys accepted for scoping, e.g. "field":"fields/20"
+    "author_in_library"        prolific authors in my collection; min_papers (int, default 3)
+                                 field / domain keys accepted for scoping
+
+  value      (string) — query text or entity ID
+  label      (string, optional) — human label shown as a chip
+  _display   (string) — human-readable name for author/journal IDs
+  exclude_title  (array of strings, optional) — words that must NOT appear in title
+
+Example:
+[
+  {"type":"keywords_title_abstract","value":"degrowth OR \"post-growth\"","label":"Degrowth"},
+  {"type":"field","value":"fields/23","label":"Environmental Science"},
+  {"type":"citing_library"}
+]</pre>
+        </details>
+        <textarea class="form-input" rows="10" style="font-family:monospace;font-size:12px;resize:vertical"
+                  x-model="importJson" placeholder='[&#10;  {"type":"keywords_title_abstract","value":"degrowth"},&#10;  {"type":"field","value":"fields/20","label":"Economics"}&#10;]'></textarea>
+        <div x-show="importError" x-text="importError" style="color:var(--red);font-size:12px;margin-top:6px"></div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-ghost" @click="showImportModal=false">Cancel</button>
+        <button class="btn btn-primary" @click="applyImportedConditions()">Apply conditions</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal: New / Edit profile -->
+  <div class="modal-overlay" x-show="showProfileModal" x-transition @click.self="showProfileModal=false">
+    <div class="modal" @click.stop>
+      <div class="modal-header">
+        <h2 x-text="editProfileId ? 'Edit Profile' : 'New Search Profile'"></h2>
+        <button class="btn btn-icon btn-ghost" @click="showProfileModal=false">
+          <svg width="15" height="15"><use href="#i-x"/></svg>
+        </button>
+      </div>
+      <div class="modal-body">
+        <div class="form-group">
+          <label class="form-label">Profile name *</label>
+          <input class="form-input" x-model="profileForm.name" placeholder="e.g. Degrowth &amp; Planetary Boundaries"
+                 @keydown.enter="saveProfileModal()">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Description</label>
+          <textarea class="form-input" rows="2" x-model="profileForm.description" style="resize:vertical"
+                    placeholder="Optional description…"></textarea>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-ghost" @click="showProfileModal=false">Cancel</button>
+        <button class="btn btn-primary" @click="saveProfileModal()"
+                x-text="editProfileId ? 'Save changes' : 'Create profile'"></button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Toasts -->
+  <div id="toast-container">
+    <template x-for="t in toasts" :key="t.id">
+      <div class="toast" :class="t.type" x-text="t.msg"></div>
+    </template>
+  </div>
+
+</div>
+<script src="/static/js/atlas.js"></script>
+</body>
+</html>

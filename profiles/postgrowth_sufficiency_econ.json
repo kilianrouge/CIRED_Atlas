@@ -1,0 +1,29 @@
+[
+  {
+    "type": "keywords_title_abstract",
+    "value": "degrowth",
+    "label": "Degrowth",
+    "exclude_title": ["self-sufficiency", "self sufficiency"]
+  },
+  {
+    "type": "keywords_title_abstract",
+    "value": "\"post-growth\"",
+    "label": "Post-growth (exact)"
+  },
+  {
+    "type": "keywords_title_abstract",
+    "value": "postgrowth",
+    "label": "Postgrowth"
+  },
+  {
+    "type": "keywords_title_abstract",
+    "value": "sufficiency",
+    "label": "Sufficiency",
+    "exclude_title": ["self-sufficiency", "self sufficiency"]
+  },
+  {
+    "type": "field",
+    "value": "fields/20",
+    "label": "Economics scope"
+  }
+]

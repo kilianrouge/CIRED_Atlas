@@ -1,0 +1,7 @@
+flask>=3.0
+pyalex>=0.15
+pyzotero>=1.6
+sentence-transformers>=2.7
+numpy>=1.24
+requests>=2.31
+python-dotenv>=1.0

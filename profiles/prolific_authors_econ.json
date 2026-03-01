@@ -1,0 +1,8 @@
+[
+  {
+    "type": "author_in_library",
+    "label": "Prolific authors (economics)",
+    "min_papers": 3,
+    "field": "fields/20"
+  }
+]
