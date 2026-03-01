@@ -21,7 +21,7 @@ import webbrowser
 from datetime import datetime, date, timedelta
 from pathlib import Path
 
-from flask import Flask, jsonify, render_template, request, abort
+from flask import Flask, jsonify, render_template, request, abort, send_from_directory
 
 import database as db
 import openalex_client as oac
@@ -255,6 +255,11 @@ def _run_search_worker(run_id: int, profile: dict, lookback_days: int,
 # ─────────────────────────────────────────────────────────────────────────────
 # Routes – SPA entry
 # ─────────────────────────────────────────────────────────────────────────────
+
+@app.route("/favicon.ico")
+def favicon():
+    return send_from_directory(app.static_folder, "star.ico", mimetype="image/x-icon")
+
 
 @app.route("/")
 def index():
