@@ -674,47 +674,127 @@
                   <use :href="group._expanded?'#i-chevup':'#i-chevdown'"/>
                 </svg>
               </div>
-              <div x-show="group._expanded" style="background:var(--bg);border-top:1px solid var(--border);padding:12px 16px">
-                <div x-show="!group._results" class="text-muted text-sm">Loading…</div>
+              <div x-show="group._expanded" style="background:var(--bg);border-top:1px solid var(--border)">
+                <div x-show="!group._results" class="text-muted text-sm" style="padding:12px 16px">Loading…</div>
                 <template x-if="group._results">
                   <div>
-                    <div style="display:flex;justify-content:flex-end;margin-bottom:10px">
-                      <button class="btn btn-ghost btn-sm" @click.stop="addAllAcceptedToZotero(group)">
-                        <svg width="11" height="11"><use href="#i-zotero"/></svg> Push all accepted to Zotero
-                      </button>
+
+                    <!-- Batch actions bar -->
+                    <div style="padding:10px 16px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+                      <span class="text-sm text-muted"
+                            x-text="group._results.length + ' papers · ' + hgPending(group).length + ' pending · ' + group._results.filter(r=>r.status==='accepted').length + ' accepted'"></span>
+                      <div class="ml-auto" style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+                        <!-- Journal filter -->
+                        <select class="form-input form-select" x-show="hgJournals(group).length"
+                                style="padding:4px 24px 4px 8px;font-size:12px;width:auto" x-model="group._journal">
+                          <option value="">All journals</option>
+                          <template x-for="j in hgJournals(group)" :key="j">
+                            <option :value="j" x-text="j"></option>
+                          </template>
+                        </select>
+                        <!-- Batch accept (no Zotero) -->
+                        <button class="btn btn-success btn-sm" @click.stop="hgBatchDecide(group,'accepted',false)"
+                                x-show="(group._selectedIds||[]).length"
+                                x-text="'Accept '+(group._selectedIds||[]).length"></button>
+                        <button class="btn btn-success btn-sm" @click.stop="hgBatchDecide(group,'accepted',true)"
+                                x-show="(group._selectedIds||[]).length"
+                                x-text="'Accept '+(group._selectedIds||[]).length+' → Zotero'"></button>
+                        <button class="btn btn-danger btn-sm" @click.stop="hgBatchDecide(group,'rejected',false)"
+                                x-show="(group._selectedIds||[]).length"
+                                x-text="'Reject '+(group._selectedIds||[]).length"></button>
+                        <button class="btn btn-ghost btn-sm" @click.stop="hgToggleSelectAll(group)">
+                          <svg width="12" height="12"><use href="#i-check"/></svg>
+                          <span x-text="(group._selectedIds||[]).length===hgPending(group).length && hgPending(group).length>0?'Deselect all':'Select all pending'"></span>
+                        </button>
+                        <select class="form-input form-select"
+                                style="padding:4px 24px 4px 8px;font-size:12px;width:auto" x-model="group._sort">
+                          <option value="score">Sort: Score</option>
+                          <option value="year_desc">Year ↓</option>
+                          <option value="year_asc">Year ↑</option>
+                          <option value="citations">Citations</option>
+                        </select>
+                        <button class="btn btn-ghost btn-sm" @click.stop="addAllAcceptedToZotero(group)">
+                          <svg width="11" height="11"><use href="#i-zotero"/></svg> Push accepted → Zotero
+                        </button>
+                      </div>
                     </div>
-                    <template x-for="r in group._results" :key="r.id">
+
+                    <!-- Result cards -->
+                    <div style="padding:10px 16px">
+                    <template x-for="r in hgSorted(group)" :key="r.id">
                       <div class="result-card" :class="r.status" style="margin-bottom:8px">
                         <div class="result-header" @click="r._expanded=!r._expanded">
                           <div class="result-score">
                             <div class="score-ring" :style="'--pct:'+Math.round((r.combined_score||0)*100)">
                               <span x-text="Math.round((r.combined_score||0)*100)"></span>
                             </div>
+                            <div class="score-label">score</div>
                           </div>
                           <div class="result-body">
-                            <div class="result-title">
-                              <a :href="r.doi?'https://doi.org/'+r.doi:'#'" target="_blank" @click.stop
-                                 x-text="r.title||'(no title)'"></a>
-                            </div>
-                            <div class="result-meta">
-                              <span x-text="r.year||'?'"></span>
-                              <span x-show="r.venue" class="meta-sep">·</span>
-                              <span x-text="r.venue"></span>
-                            </div>
-                            <div class="reason-chips" x-show="(r.match_reasons||[]).length || (r._profile_name && group.runs.length > 1)">
-                              <template x-for="reason in (r.match_reasons||[])" :key="reason">
-                                <span class="reason-chip" x-text="reason"></span>
-                              </template>
-                              <span class="reason-chip profile-chip"
-                                    x-show="r._profile_name && group.runs.length > 1"
-                                    x-text="r._profile_name"></span>
+                            <div style="display:flex;align-items:flex-start;gap:8px">
+                              <input type="checkbox" class="result-checkbox"
+                                     :checked="(group._selectedIds||[]).includes(r.id)"
+                                     @click.stop="hgToggleSelect(group, r.id)"
+                                     x-show="r.status==='pending'">
+                              <div style="flex:1;min-width:0">
+                                <div class="result-title">
+                                  <a :href="r.doi?'https://doi.org/'+r.doi:'https://openalex.org/'+r.paper_oa_id"
+                                     target="_blank" @click.stop x-text="r.title||'(no title)'"></a>
+                                </div>
+                                <div class="result-meta">
+                                  <span x-text="r.year||'?'"></span>
+                                  <span x-show="r.venue" class="meta-sep">·</span>
+                                  <span x-show="r.venue" x-text="r.venue" class="result-venue"></span>
+                                  <span class="meta-sep">·</span>
+                                  <span x-text="formatAuthors(r.authors, 3)"></span>
+                                  <template x-if="r.cited_by_count">
+                                    <span>
+                                      <span class="meta-sep">·</span>
+                                      <svg width="10" height="10" style="vertical-align:-1px;opacity:.5"><use href="#i-layers"/></svg>
+                                      <span x-text="r.cited_by_count + ' cit.'"></span>
+                                    </span>
+                                  </template>
+                                </div>
+                                <div class="reason-chips" x-show="(r.match_reasons||[]).length || (r._profile_name && group.runs.length > 1)">
+                                  <template x-for="reason in (r.match_reasons||[])" :key="reason">
+                                    <span class="reason-chip" x-text="reason"></span>
+                                  </template>
+                                  <span class="reason-chip profile-chip"
+                                        x-show="r._profile_name && group.runs.length > 1"
+                                        x-text="r._profile_name"></span>
+                                </div>
+                              </div>
                             </div>
                           </div>
-                          <span class="badge"
-                                :class="r.status==='accepted'?'badge-green':r.status==='rejected'?'badge-red':'badge-gray'"
-                                x-text="r.status"></span>
+                          <div style="display:flex;flex-direction:column;align-items:flex-end;gap:6px;flex-shrink:0">
+                            <span class="badge badge-green" x-show="r.status==='accepted'">Accepted</span>
+                            <span class="badge badge-red"   x-show="r.status==='rejected'">Rejected</span>
+                            <span class="badge badge-gray"  x-show="r.status==='skipped'">Skipped</span>
+                            <span class="badge badge-blue"  x-show="r.status==='pending'">Pending</span>
+                            <svg width="14" height="14" style="color:var(--text-3)">
+                              <use :href="r._expanded?'#i-chevup':'#i-chevdown'"/>
+                            </svg>
+                          </div>
                         </div>
-                        <div class="result-detail" x-show="r._expanded">
+                        <div class="result-detail" x-show="r._expanded" x-transition:enter.duration.150ms>
+                          <!-- Score breakdown -->
+                          <div class="score-bars">
+                            <div class="score-bar-row">
+                              <span class="score-bar-label">Library</span>
+                              <div class="score-bar-track"><div class="score-bar-fill library" :style="'width:'+Math.round((r.score_library||0)*100)+'%'"></div></div>
+                              <span class="score-bar-val" x-text="Math.round((r.score_library||0)*100)+'%'"></span>
+                            </div>
+                            <div class="score-bar-row">
+                              <span class="score-bar-label">Feedback</span>
+                              <div class="score-bar-track"><div class="score-bar-fill feedback" :style="'width:'+Math.round((r.score_feedback||0)*100)+'%'"></div></div>
+                              <span class="score-bar-val" x-text="Math.round((r.score_feedback||0)*100)+'%'"></span>
+                            </div>
+                            <div class="score-bar-row" style="border-top:1px solid var(--border);padding-top:4px;margin-top:2px">
+                              <span class="score-bar-label" style="font-weight:700;color:var(--text)">Combined</span>
+                              <div class="score-bar-track"><div class="score-bar-fill combined" :style="'width:'+Math.round((r.combined_score||0)*100)+'%'"></div></div>
+                              <span class="score-bar-val" style="font-weight:700;color:var(--blue-800)" x-text="Math.round((r.combined_score||0)*100)+'%'"></span>
+                            </div>
+                          </div>
                           <div class="detail-abstract" x-show="r.abstract">
                             <p x-text="r.abstract" style="line-height:1.65;color:var(--text-2)"></p>
                           </div>
@@ -731,13 +811,27 @@
                             </div>
                           </div>
                           <div class="result-actions">
-                            <button class="btn btn-success btn-sm" @click.stop="addToZoteroRetro(r)">
-                              <svg width="11" height="11"><use href="#i-zotero"/></svg> Add to Zotero
+                            <button class="btn btn-success btn-sm" @click.stop="hgDecideSingle(group,r,'accepted',false)"
+                                    x-show="r.status==='pending'">Accept</button>
+                            <button class="btn btn-success btn-sm" @click.stop="hgDecideSingle(group,r,'accepted',true)"
+                                    x-show="r.status==='pending'">
+                              <svg width="11" height="11"><use href="#i-zotero"/></svg> Accept → Zotero
+                            </button>
+                            <button class="btn btn-danger btn-sm" @click.stop="hgDecideSingle(group,r,'rejected',false)"
+                                    x-show="r.status==='pending'">Reject</button>
+                            <button class="btn btn-ghost btn-sm" @click.stop="addToZoteroRetro(r)"
+                                    x-show="r.status==='accepted'">
+                              <svg width="11" height="11"><use href="#i-zotero"/></svg> Push to Zotero
+                            </button>
+                            <button class="btn btn-ghost btn-sm" @click.stop="copyDoi(r.doi)" x-show="r.doi">
+                              <svg width="11" height="11"><use href="#i-copy"/></svg> Copy DOI
                             </button>
                           </div>
                         </div>
                       </div>
                     </template>
+                    </div>
+
                   </div>
                 </template>
               </div>

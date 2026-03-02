@@ -72,7 +72,8 @@ function atlasApp() {
       for (const run of this.historyRuns) {
         const key = run.group_id || `_solo_${run.id}`;
         if (!map.has(key)) {
-          map.set(key, { group_id: run.group_id, runs: [], _expanded: false, _results: null });
+          map.set(key, { group_id: run.group_id, runs: [], _expanded: false, _results: null,
+                         _selectedIds: [], _sort: 'score', _journal: '' });
         }
         map.get(key).runs.push(run);
       }
@@ -497,8 +498,80 @@ function atlasApp() {
           if (!best.has(p.paper_oa_id) || (p.combined_score || 0) > (best.get(p.paper_oa_id).combined_score || 0))
             best.set(p.paper_oa_id, p);
         }
-        group._results = [...best.values()].sort((a, b) => (b.combined_score || 0) - (a.combined_score || 0));
+        group._results     = [...best.values()].sort((a, b) => (b.combined_score || 0) - (a.combined_score || 0));
+        group._selectedIds = [];
+        group._sort        = 'score';
+        group._journal     = '';
       }
+    },
+
+    // ── History group helpers (mirrors main results panel) ──────────────────
+    hgJournals(group) {
+      return [...new Set((group._results || []).map(r => r.venue).filter(Boolean))].sort();
+    },
+
+    hgSorted(group) {
+      let arr = group._journal
+        ? (group._results || []).filter(r => (r.venue || '') === group._journal)
+        : [...(group._results || [])];
+      const s = group._sort || 'score';
+      if (s === 'score')      arr.sort((a,b) => (b.combined_score||0)-(a.combined_score||0));
+      else if (s === 'year_desc') arr.sort((a,b) => (b.year||0)-(a.year||0));
+      else if (s === 'year_asc')  arr.sort((a,b) => (a.year||0)-(b.year||0));
+      else if (s === 'citations') arr.sort((a,b) => (b.cited_by_count||0)-(a.cited_by_count||0));
+      return arr;
+    },
+
+    hgPending(group) {
+      return (group._results || []).filter(r => r.status === 'pending');
+    },
+
+    hgToggleSelect(group, id) {
+      const idx = (group._selectedIds || []).indexOf(id);
+      if (idx === -1) group._selectedIds.push(id);
+      else group._selectedIds.splice(idx, 1);
+    },
+
+    hgToggleSelectAll(group) {
+      const pending = this.hgPending(group).map(r => r.id);
+      const sel = group._selectedIds || [];
+      group._selectedIds = (sel.length === pending.length && pending.length > 0) ? [] : [...pending];
+    },
+
+    async hgBatchDecide(group, decision, addToZotero) {
+      const ids = [...(group._selectedIds || [])];
+      if (!ids.length) return;
+      const res = await fetch('/api/results/batch_decide', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          result_ids: ids, decision, push_to_zotero: addToZotero,
+          collection_key: this.settings.import_collection_key || this.settings.default_collection_key,
+          inbox_subcollection: this.settings.default_inbox_subcollection,
+          tag: this.settings.default_tag,
+        })
+      });
+      const data = await res.json();
+      for (const id of ids) {
+        const r = (group._results || []).find(x => x.id === id);
+        if (r) r.status = decision;
+      }
+      group._selectedIds = [];
+      this.toast(`${ids.length} papers ${decision}` + (addToZotero ? ' — pushed to Zotero' : ''));
+    },
+
+    async hgDecideSingle(group, r, decision, addToZotero) {
+      const res = await fetch(`/api/results/${r.id}/decide`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ decision, add_to_zotero: addToZotero,
+          collection_key: this.settings.import_collection_key || this.settings.default_collection_key,
+          inbox_subcollection: this.settings.default_inbox_subcollection,
+          tag: this.settings.default_tag })
+      });
+      const data = await res.json();
+      r.status = decision;
+      if (group._selectedIds) group._selectedIds = group._selectedIds.filter(id => id !== r.id);
+      if (addToZotero && data.zotero_added) this.toast('Added to Zotero');
+      else this.toast(decision === 'accepted' ? 'Accepted' : decision === 'rejected' ? 'Rejected' : 'Skipped');
     },
 
     async deleteHistoryGroup(group, $event) {

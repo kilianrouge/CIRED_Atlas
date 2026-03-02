@@ -272,6 +272,30 @@ def rank_candidates(
     else:
         scores_feedback = [0.0] * len(candidates)
 
+    # ── Feedback quality log ──────────────────────────────────────────────────
+    _tag = f"[run {run_id}]" if run_id is not None else "[ATLAS]"
+    n_acc_papers = len(db.get_all_accepted_paper_texts())
+    n_rej_papers = len(db.get_all_rejected_paper_texts())
+    if acc_centroid is not None or rej_centroid is not None:
+        def _stats(vals: list[float]) -> str:
+            if not vals:
+                return "n/a"
+            sv = sorted(vals)
+            n = len(sv)
+            return (f"mean={sum(sv)/n:.3f} med={sv[n//2]:.3f} "
+                    f"min={sv[0]:.3f} max={sv[-1]:.3f}")
+        n_boosted = sum(1 for s in scores_feedback if s > 0)
+        print(f"{_tag} Feedback quality  | training: {n_acc_papers} accepted, {n_rej_papers} rejected")
+        if acc_centroid is not None:
+            print(f"{_tag}   → sim(candidates→accepted)  : {_stats(scores_acc)}")
+        if rej_centroid is not None:
+            print(f"{_tag}   → sim(candidates→rejected)  : {_stats(scores_rej)}")
+        print(f"{_tag}   → feedback boost (acc−rej>0) : {n_boosted}/{len(candidates)} papers "
+              f"| {_stats([s for s in scores_feedback if s > 0]) if n_boosted else 'none'}")
+    else:
+        print(f"{_tag} Feedback quality  | no feedback data yet "
+              f"({n_acc_papers} accepted, {n_rej_papers} rejected in DB)")
+
     # ── Combine ───────────────────────────────────────────────────────────────
     total_w = weight_library + weight_feedback
     wl = weight_library / total_w if total_w else 1.0
@@ -294,6 +318,11 @@ def rank_candidates(
         scores = [r[0] for r in ranked]
         print(f"{_tag} Embedding done ({method}): {len(ranked)}/{len(candidates)} above threshold "
               f"| top={scores[0]:.3f} median={scores[len(scores)//2]:.3f} min={scores[-1]:.3f}")
+        # Show score breakdown for top-5 to make weight contribution visible
+        print(f"{_tag}   top papers (combined / library / feedback):")
+        for combined, sl, sf, paper in ranked[:5]:
+            title = (paper.get("title") or "?")[:60]
+            print(f'{_tag}     {combined:.3f} = {wl:.2f}\u00d7{sl:.3f}lib + {wf:.2f}\u00d7{sf:.3f}fb  \u201c{title}\u201d')
     else:
         print(f"{_tag} Embedding done ({method}): 0 candidates above threshold={threshold}")
 

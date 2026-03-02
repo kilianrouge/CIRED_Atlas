@@ -37,8 +37,14 @@ app.config["JSON_SORT_KEYS"] = False
 class _NoAccessLog(logging.Filter):
     def filter(self, record: logging.LogRecord) -> bool:  # type: ignore[override]
         msg = record.getMessage()
-        # werkzeug access log lines look like: '127.0.0.1 - - [date] "GET /... HTTP/1.1" 200 -'
-        return '"GET ' not in msg and '"POST ' not in msg and '"PUT ' not in msg and '"DELETE ' not in msg
+        # werkzeug access log lines: '127.0.0.1 - - [date] "METHOD /... HTTP/1.1" 200 -'
+        # OR the message part alone: '"GET /... HTTP/1.1" 200 -'
+        if '- - [' in msg:          # IP-style access log line
+            return False
+        for method in ('"GET ', '"POST ', '"PUT ', '"DELETE ', '"HEAD ', '"OPTIONS '):
+            if method in msg:
+                return False
+        return True
 
 logging.getLogger("werkzeug").addFilter(_NoAccessLog())
 
