@@ -1,31 +1,26 @@
 #!/usr/bin/env bash
 # connect_atlas.sh – Open an SSH tunnel to the ATLAS server and start the app.
 # Run this script LOCALLY. It will:
-#   1. Ask for server host and username
+#   1. Ask for your username
 #   2. Establish an SSH tunnel (local port 5050 → remote port 5050)
 #   3. Start the ATLAS app on the server
 #   4. Open http://localhost:5050 in your local browser
 #
-# Usage:  bash connect_atlas.sh [host] [user] [port]
+# Usage:  bash connect_atlas.sh [user] [port]
 
 set -e
 
-LOCAL_PORT="${3:-5050}"
+LOCAL_PORT="${2:-5050}"
 REMOTE_PORT="5050"
 REMOTE_APP_DIR="/diskdata/cired/rouge/ATLAS"
 REMOTE_RUN_CMD="bash ${REMOTE_APP_DIR}/run_atlas.sh ${REMOTE_PORT}"
 
 # ── Collect credentials ───────────────────────────────────────────────────────
 
-if [[ -n "$1" ]]; then
-    HOST="$1"
-else
-    read -rp "Server hostname or IP [inari.centre-cired.fr]: " HOST
-    HOST="${HOST:-inari.centre-cired.fr}"
-fi
+HOST="inari.centre-cired.fr"
 
-if [[ -n "$2" ]]; then
-    USER_NAME="$2"
+if [[ -n "$1" ]]; then
+    USER_NAME="$1"
 else
     read -rp "Username: " USER_NAME
 fi
