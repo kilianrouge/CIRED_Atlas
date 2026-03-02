@@ -17,7 +17,6 @@ import socket
 import threading
 import traceback
 import uuid
-import webbrowser
 from datetime import datetime, date, timedelta
 from pathlib import Path
 
@@ -33,15 +32,22 @@ import embeddings as emb
 app = Flask(__name__, template_folder="templates", static_folder="static")
 app.config["JSON_SORT_KEYS"] = False
 
-db.init_db()
-
 # Suppress per-request access logs ("GET /api/... 200" lines)
-logging.getLogger("werkzeug").setLevel(logging.ERROR)
+# Use a filter so startup/error messages from werkzeug still show.
+class _NoAccessLog(logging.Filter):
+    def filter(self, record: logging.LogRecord) -> bool:  # type: ignore[override]
+        msg = record.getMessage()
+        # werkzeug access log lines look like: '127.0.0.1 - - [date] "GET /... HTTP/1.1" 200 -'
+        return '"GET ' not in msg and '"POST ' not in msg and '"PUT ' not in msg and '"DELETE ' not in msg
 
-# Bind the DB user to the Unix account running the process.
+logging.getLogger("werkzeug").addFilter(_NoAccessLog())
+
+# Bind the DB user to the Unix account running the process BEFORE init_db(),
+# so the correct per-user DB is opened (not the fallback "default.db").
 # Each user on the server runs their own `python app.py`, so $USER is unique.
 _SERVER_USER = re.sub(r"[^a-zA-Z0-9_-]", "_", os.getenv("USER", "default"))[:32] or "default"
 db.set_current_user(_SERVER_USER)
+db.init_db()
 print(f"[ATLAS] running as user: {_SERVER_USER}")
 
 # In-progress background runs: run_id → thread
@@ -727,16 +733,9 @@ PORT = int(os.getenv("ATLAS_PORT", "5050"))
 
 
 def _open_browser():
-    import time as _t
-    _t.sleep(1.2)
-    webbrowser.open(f"http://{HOST}:{PORT}")
+    pass  # No-op: app is always accessed via SSH tunnel; browser opens on the client side.
 
 
 if __name__ == "__main__":
-    print(f"\n  ╔══════════════════════════════════════╗")
-    print(f"  ║   ATLAS - Literature Discovery App   ║")
-    print(f"  ║   http://{HOST}:{PORT}              ║")
-    print(f"  ╚══════════════════════════════════════╝\n")
-    t = threading.Thread(target=_open_browser, daemon=True)
-    t.start()
+    print(f"[ATLAS] listening on http://{HOST}:{PORT}  (SSH tunnel: localhost:{PORT})")
     app.run(host=HOST, port=PORT, debug=False, use_reloader=False, threaded=True)

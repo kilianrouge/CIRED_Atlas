@@ -14,6 +14,7 @@ paper_decisions     persistent per-paper user decisions (accept/reject) used
 from __future__ import annotations
 
 import json
+import os
 import re
 import shutil
 import sqlite3
@@ -22,6 +23,8 @@ from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
 from typing import Any
+
+from cryptography.fernet import Fernet
 
 # ── Per-user database paths ───────────────────────────────────────────────────
 _LEGACY_DB  = Path(__file__).parent / "atlas.db"
@@ -35,12 +38,64 @@ _MIGRATIONS = [
 _local = threading.local()
 _default_user: str = "default"  # set at startup; used by threads with no explicit bind
 
+# Keys whose values are encrypted at rest in the settings table.
+_SENSITIVE_KEYS: frozenset[str] = frozenset({"zotero_api_key"})
+_FERNET_PREFIX = "fernet:"
+_fernet_cache: dict[str, Fernet] = {}  # user_id → Fernet instance
+_fernet_lock = threading.Lock()
+
+
+def _get_fernet(user_id: str | None = None) -> Fernet:
+    """Return (or create) the per-user Fernet instance, backed by a 600-mode key file."""
+    uid = user_id or get_current_user()
+    with _fernet_lock:
+        if uid in _fernet_cache:
+            return _fernet_cache[uid]
+        key_path = _DATA_DIR / f"{re.sub(r'[^a-zA-Z0-9_-]', '_', uid)[:32]}.key"
+        _DATA_DIR.mkdir(parents=True, exist_ok=True)
+        if key_path.exists():
+            key = key_path.read_bytes().strip()
+        else:
+            key = Fernet.generate_key()
+            key_path.write_bytes(key)
+            os.chmod(key_path, 0o600)
+        f = Fernet(key)
+        _fernet_cache[uid] = f
+        return f
+
+
+def _encrypt_value(value: str) -> str:
+    """Encrypt a string and return a prefixed token."""
+    return _FERNET_PREFIX + _get_fernet().encrypt(value.encode()).decode()
+
+
+def _decrypt_value(stored: str) -> str:
+    """Decrypt a prefixed token; returns the original string."""
+    token = stored[len(_FERNET_PREFIX):].encode()
+    return _get_fernet().decrypt(token).decode()
+
 
 def get_db_path(user_id: str) -> Path:
     """Return the SQLite file path for a given user (name sanitised)."""
     safe = re.sub(r"[^a-zA-Z0-9_-]", "_", user_id)[:32] or "default"
-    _DATA_DIR.mkdir(parents=True, exist_ok=True)
-    return _DATA_DIR / f"{safe}.db"
+    try:
+        _DATA_DIR.mkdir(parents=True, exist_ok=True)
+    except PermissionError:
+        raise PermissionError(
+            f"Cannot create user data directory {_DATA_DIR}. "
+            f"Run: chmod 1777 {_DATA_DIR}"
+        )
+    db_path = _DATA_DIR / f"{safe}.db"
+    if db_path.exists() and not os.access(db_path, os.W_OK):
+        raise PermissionError(
+            f"Database file {db_path} is not writable by the current user."
+        )
+    if not os.access(_DATA_DIR, os.W_OK):
+        raise PermissionError(
+            f"User data directory {_DATA_DIR} is not writable. "
+            f"Run: chmod 1777 {_DATA_DIR}"
+        )
+    return db_path
 
 
 def set_current_user(user_id: str) -> None:
@@ -198,17 +253,39 @@ def get_setting(key: str, default: Any = None) -> Any:
     ).fetchone()
     if row is None:
         return default
+    raw: str = row["value"]
+    # Decrypt sensitive keys; auto-migrate plaintext → encrypted on first read.
+    if key in _SENSITIVE_KEYS and raw:
+        try:
+            plaintext_json = json.loads(raw)
+            plaintext = plaintext_json if isinstance(plaintext_json, str) else raw
+        except (json.JSONDecodeError, TypeError):
+            plaintext = raw
+        if isinstance(plaintext, str) and plaintext.startswith(_FERNET_PREFIX):
+            try:
+                return _decrypt_value(plaintext)
+            except Exception:
+                return default
+        else:
+            # Plaintext found – re-save as encrypted transparently
+            if plaintext:
+                set_setting(key, plaintext)
+            return plaintext
     try:
-        return json.loads(row["value"])
+        return json.loads(raw)
     except (json.JSONDecodeError, TypeError):
-        return row["value"]
+        return raw
 
 
 def set_setting(key: str, value: Any) -> None:
+    if key in _SENSITIVE_KEYS and isinstance(value, str) and value:
+        stored = _encrypt_value(value)
+    else:
+        stored = json.dumps(value)
     with transaction() as conn:
         conn.execute(
             "INSERT OR REPLACE INTO settings(key,value) VALUES(?,?)",
-            (key, json.dumps(value)),
+            (key, stored),
         )
 
 
@@ -216,10 +293,15 @@ def get_all_settings() -> dict:
     rows = get_connection().execute("SELECT key, value FROM settings").fetchall()
     out: dict = {}
     for row in rows:
-        try:
-            out[row["key"]] = json.loads(row["value"])
-        except (json.JSONDecodeError, TypeError):
-            out[row["key"]] = row["value"]
+        k, raw = row["key"], row["value"]
+        if k in _SENSITIVE_KEYS and raw:
+            # Decrypt; fall back to get_setting which handles migration too
+            out[k] = get_setting(k, "")
+        else:
+            try:
+                out[k] = json.loads(raw)
+            except (json.JSONDecodeError, TypeError):
+                out[k] = raw
     return out
 
 
