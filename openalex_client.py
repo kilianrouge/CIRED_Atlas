@@ -31,12 +31,22 @@ from collections import Counter
 from datetime import date, timedelta
 from typing import Any
 
+import re
+
 import pyalex
 from pyalex import Works, Authors, Sources
 
 import database as db
 
 warnings.filterwarnings("ignore", category=DeprecationWarning)
+
+# ── Title normalisation for robust deduplication ──────────────────────────────
+_TITLE_PREFIX = "T:"  # prefix used inside `seen` sets to tag title-based entries
+
+
+def _normalize_title(t: str) -> str:
+    """Lower-case, strip all non-alphanumeric chars for fuzzy title matching."""
+    return re.sub(r'[^a-z0-9 ]', '', (t or '').lower()).strip()
 
 # ── pyalex config ─────────────────────────────────────────────────────────────
 
@@ -151,15 +161,24 @@ def _get_with_backoff(query, per_page: int = 200) -> list[dict]:
 
 def _deduplicate(papers: list[dict], seen: set[str],
                  existing_dois: set[str], existing_oa_ids: set[str]) -> list[dict]:
+    """Deduplicate against the library and within already-seen candidates.
+    Checks OA ID, DOI, and normalised title (stored in `seen` with the T: prefix)."""
     out = []
     for p in papers:
         oa_id = (p.get("id") or "").replace("https://openalex.org/", "")
-        doi = (p.get("doi") or "").replace("https://doi.org/", "").lower().strip()
+        doi   = (p.get("doi") or "").replace("https://doi.org/", "").lower().strip()
+        nt    = _normalize_title(p.get("title") or "")
+        tk    = _TITLE_PREFIX + nt  # e.g. "T:degrowth and ecological economics"
         if oa_id in existing_oa_ids or oa_id in seen:
             continue
         if doi and doi in existing_dois:
             continue
+        # Title match: only when title is long enough to be discriminating
+        if len(nt) > 15 and tk in seen:
+            continue
         seen.add(oa_id)
+        if len(nt) > 15:
+            seen.add(tk)   # block same-titled papers from later conditions too
         out.append(p)
     return out
 
@@ -667,9 +686,15 @@ def run_profile_search(
 
     _tag = f"[run {run_id}]" if run_id is not None else "[ATLAS]"
 
-    existing_dois = {m["doi"] for m in library_meta if m.get("doi")}
+    existing_dois   = {m["doi"] for m in library_meta if m.get("doi")}
     existing_oa_ids = {m["openalex_id"] for m in library_meta if m.get("openalex_id")}
     seen: set[str] = set()
+    # Pre-populate `seen` with normalised library titles so that papers already
+    # in the library are excluded even when the OA-ID / DOI doesn't match.
+    for m in library_meta:
+        nt = _normalize_title(m.get("title") or "")
+        if len(nt) > 15:
+            seen.add(_TITLE_PREFIX + nt)
 
     # Pre-resolve library OA IDs once (used by citing / authors handlers)
     library_oa_ids: list[str] | None = None

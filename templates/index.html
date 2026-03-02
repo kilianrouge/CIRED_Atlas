@@ -426,6 +426,18 @@
               <span class="text-sm text-muted"
                     x-text="results.length + ' papers · ' + pendingCount + ' pending · ' + results.filter(r=>r.status==='accepted').length + ' accepted'"></span>
               <div class="ml-auto" style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+                <!-- Journal filter -->
+                <select class="form-input form-select" x-show="availableJournals.length"
+                        style="padding:4px 24px 4px 8px;font-size:12px;width:auto" x-model="journalFilter">
+                  <option value="">All journals</option>
+                  <template x-for="j in availableJournals" :key="j">
+                    <option :value="j" x-text="j"></option>
+                  </template>
+                </select>
+                <!-- Batch accept (no Zotero) -->
+                <button class="btn btn-success btn-sm" @click="batchDecide('accepted',false)"
+                        x-show="selectedResultIds.length"
+                        x-text="'Accept '+selectedResultIds.length"></button>
                 <button class="btn btn-success btn-sm" @click="batchDecide('accepted',true)"
                         x-show="selectedResultIds.length"
                         x-text="'Accept '+selectedResultIds.length+' → Zotero'"></button>
@@ -770,23 +782,55 @@
 
         <div class="settings-section">
           <div class="settings-section-header" @click="settingSections.collection=!settingSections.collection">
-            <svg width="14" height="14"><use href="#i-books"/></svg> Working Collection
+            <svg width="14" height="14"><use href="#i-books"/></svg> Zotero Collections
             <svg class="ml-auto" width="14" height="14"><use :href="settingSections.collection?'#i-chevup':'#i-chevdown'"/></svg>
           </div>
           <div class="settings-section-body" x-show="settingSections.collection">
+
+            <!-- ── Training Library (multi-select) ───────────────────────── -->
             <div class="form-group">
-              <label class="form-label">Working folder</label>
+              <label class="form-label">Training library <span class="text-muted" style="font-weight:400;font-size:11px">(papers used to measure similarity)</span></label>
               <div style="display:flex;gap:8px;margin-bottom:8px">
                 <button class="btn btn-secondary btn-sm" @click="loadZoteroCollections()">
                   <svg width="12" height="12"><use href="#i-refresh"/></svg> Load from Zotero
                 </button>
-                <span class="text-muted text-sm" x-show="settings.default_collection_key"
-                      x-text="'Selected: ' + (flatCollections.find(c=>c.key===settings.default_collection_key)||{path:'?'}).path"></span>
+                <span class="text-muted text-sm"
+                      x-text="(settings.training_collection_keys||[]).length
+                        ? (settings.training_collection_keys||[]).length + ' collection(s) selected'
+                        : (flatCollections.length ? 'Using: Entire library' : '')"></span>
               </div>
-              <div class="col-tree" x-show="flatCollections.length">
+              <div class="col-tree">
+                <div class="col-tree-node" :class="{selected: !(settings.training_collection_keys||[]).length}"
+                     @click="settings.training_collection_keys=[]" style="font-style:italic">
+                  <svg width="11" height="11"><use href="#i-books"/></svg>
+                  <span>Entire library</span>
+                </div>
                 <template x-for="col in flatCollections" :key="col.key">
-                  <div class="col-tree-node" :class="{selected: settings.default_collection_key===col.key}"
-                       @click="settings.default_collection_key=col.key"
+                  <div class="col-tree-node"
+                       :class="{selected: (settings.training_collection_keys||[]).includes(col.key)}"
+                       @click="(() => { const keys = [...(settings.training_collection_keys||[])]; const i=keys.indexOf(col.key); i===-1 ? keys.push(col.key) : keys.splice(i,1); settings.training_collection_keys=keys; })()"
+                       :style="'padding-left:'+((col.path||'').split(' / ').length-1)*14+8+'px'">
+                    <input type="checkbox" style="pointer-events:none;margin-right:4px"
+                           :checked="(settings.training_collection_keys||[]).includes(col.key)">
+                    <svg width="11" height="11"><use href="#i-books"/></svg>
+                    <span x-text="col.name"></span>
+                  </div>
+                </template>
+              </div>
+            </div>
+
+            <!-- ── Import Destination (single-select) ───────────────────── -->
+            <div class="form-group" style="margin-top:14px">
+              <label class="form-label">Import destination <span class="text-muted" style="font-weight:400;font-size:11px">(where accepted papers go)</span></label>
+              <div class="col-tree">
+                <div class="col-tree-node" :class="{selected: !settings.import_collection_key}"
+                     @click="settings.import_collection_key=''" style="font-style:italic">
+                  <svg width="11" height="11"><use href="#i-books"/></svg>
+                  <span>Library root (no collection)</span>
+                </div>
+                <template x-for="col in flatCollections" :key="col.key">
+                  <div class="col-tree-node" :class="{selected: settings.import_collection_key===col.key}"
+                       @click="settings.import_collection_key=col.key"
                        :style="'padding-left:'+((col.path||'').split(' / ').length-1)*14+8+'px'">
                     <svg width="11" height="11"><use href="#i-books"/></svg>
                     <span x-text="col.name"></span>

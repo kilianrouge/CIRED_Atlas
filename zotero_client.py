@@ -97,11 +97,13 @@ def get_flat_collections() -> list[dict]:
 def get_library_items(collection_key: str, use_cache: bool = True) -> list[dict]:
     """
     Fetch all journalArticle items from the given collection key.
+    If collection_key is empty/None, fetches from the entire library.
     Caches to disk for 6 hours.
     """
     cache_dir = Path(__file__).parent / "cache"
     cache_dir.mkdir(exist_ok=True)
-    cache_path = cache_dir / f"library_{collection_key}.json"
+    cache_label = collection_key if collection_key else "_all_"
+    cache_path = cache_dir / f"library_{cache_label}.json"
 
     if use_cache and cache_path.exists():
         age_h = (time.time() - cache_path.stat().st_mtime) / 3600
@@ -112,9 +114,12 @@ def get_library_items(collection_key: str, use_cache: bool = True) -> list[dict]
     items: list[dict] = []
     start = 0
     while True:
-        chunk = zot.collection_items(
-            collection_key, itemType="journalArticle", start=start, limit=100
-        )
+        if collection_key:
+            chunk = zot.collection_items(
+                collection_key, itemType="journalArticle", start=start, limit=100
+            )
+        else:
+            chunk = zot.items(itemType="journalArticle", start=start, limit=100)
         if not chunk:
             break
         items.extend(chunk)
@@ -125,6 +130,27 @@ def get_library_items(collection_key: str, use_cache: bool = True) -> list[dict]
 
     cache_path.write_text(json.dumps(items, ensure_ascii=False, indent=2))
     return items
+
+
+def get_library_items_multi(collection_keys: list[str], use_cache: bool = True) -> list[dict]:
+    """
+    Fetch and merge items from multiple Zotero collections.
+    If collection_keys is empty, fetches the entire library.
+    Deduplicates by Zotero item key.
+    """
+    if not collection_keys:
+        return get_library_items("", use_cache=use_cache)
+    if len(collection_keys) == 1:
+        return get_library_items(collection_keys[0], use_cache=use_cache)
+    seen_zk: set[str] = set()
+    merged: list[dict] = []
+    for key in collection_keys:
+        for item in get_library_items(key, use_cache=use_cache):
+            zk = (item.get("data") or {}).get("key", "") or id(item)
+            if zk not in seen_zk:
+                seen_zk.add(str(zk))
+                merged.append(item)
+    return merged
 
 
 def extract_item_metadata(items: list[dict]) -> list[dict]:
@@ -234,13 +260,18 @@ def _paper_to_zotero_item(paper: dict, collection_key: str,
     }
 
 
-def _find_or_create_subcollection(zot: zotero.Zotero, parent_key: str, child_name: str) -> str:
-    for sub in zot.collections_sub(parent_key):
+def _find_or_create_subcollection(zot: zotero.Zotero, parent_key: str | None, child_name: str) -> str:
+    # Search existing collections: subcollections of parent, or top-level if no parent
+    existing = zot.collections_sub(parent_key) if parent_key else zot.collections(top=True)
+    for sub in existing:
         if sub["data"]["name"].lower() == child_name.lower():
             return sub["key"]
+    payload: dict = {"name": child_name}
+    if parent_key:
+        payload["parentCollection"] = parent_key
     for attempt in range(3):
         try:
-            result = zot.create_collections([{"name": child_name, "parentCollection": parent_key}])
+            result = zot.create_collections([payload])
             return list(result.get("success", {}).values())[0]
         except Exception as exc:
             time.sleep(5 * (attempt + 1))
@@ -249,12 +280,13 @@ def _find_or_create_subcollection(zot: zotero.Zotero, parent_key: str, child_nam
 
 def add_papers_to_collection(
     papers: list[dict],
-    target_collection_key: str,
+    target_collection_key: str | None,
     inbox_subcollection: str | None = None,
     extra_tag: str | None = None,
 ) -> list[str]:
     """
     Push a list of OpenAlex papers to Zotero.
+    If target_collection_key is empty/None, items are added to the library root.
 
     Returns list of created Zotero item keys.
     """
@@ -264,9 +296,12 @@ def add_papers_to_collection(
     zot = _zot()
 
     # Resolve target collection (optionally nested)
-    dest_key = target_collection_key
-    if inbox_subcollection:
-        dest_key = _find_or_create_subcollection(zot, target_collection_key, inbox_subcollection)
+    dest_key = target_collection_key or None
+    if inbox_subcollection and dest_key:
+        dest_key = _find_or_create_subcollection(zot, dest_key, inbox_subcollection)
+    elif inbox_subcollection and not dest_key:
+        # No parent collection — create/find subcollection at library root
+        dest_key = _find_or_create_subcollection(zot, None, inbox_subcollection)
 
     created_keys: list[str] = []
     for i in range(0, len(papers), 50):

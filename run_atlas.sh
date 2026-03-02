@@ -20,4 +20,8 @@ if [[ -n "$OLD_PID" ]]; then
 fi
 
 cd "$DIR"
+# Ensure all files created by this process (cache, DB) are world-writable
+# so every user sharing this installation can read and overwrite them.
+# Sensitive files (*.key) are explicitly chmod 600'd in code, overriding this.
+umask 000
 exec "$PYTHON" app.py

@@ -46,9 +46,12 @@ function atlasApp() {
       weight_arbitration: 0.3,
       similarity_threshold: 0,
       max_per_condition: 30,
+      training_collection_keys: [],  // list of collection keys for library training ([] = entire library)
+      import_collection_key: '',     // destination collection for Zotero import
     },
     flatCollections: [],
     settingSections: { zotero: true, collection: false, scoring: false },
+    journalFilter: '',
 
     // Modal
     showProfileModal: false,
@@ -330,7 +333,7 @@ function atlasApp() {
         profile_ids: this.selectedProfileIds,
         timeframe: this.runTimeframe,
         weight_arbitration: this.weightArbitration,
-        collection_key: this.settings.default_collection_key || null
+        training_collection_keys: this.settings.training_collection_keys || [],
       };
       const r = await fetch('/api/search/run', {
         method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body)
@@ -393,12 +396,18 @@ function atlasApp() {
     get pendingCount() { return this.pendingResults.length; },
 
     get sortedResults() {
-      const arr = [...this.results];
+      let arr = this.journalFilter
+        ? this.results.filter(r => (r.venue || '') === this.journalFilter)
+        : [...this.results];
       if (this.resultSort === 'score') arr.sort((a,b) => (b.combined_score||0)-(a.combined_score||0));
       else if (this.resultSort === 'year_desc') arr.sort((a,b) => (b.year||0)-(a.year||0));
       else if (this.resultSort === 'year_asc') arr.sort((a,b) => (a.year||0)-(b.year||0));
       else if (this.resultSort === 'citations') arr.sort((a,b) => (b.cited_by_count||0)-(a.cited_by_count||0));
       return arr;
+    },
+
+    get availableJournals() {
+      return [...new Set(this.results.map(r => r.venue).filter(Boolean))].sort();
     },
 
     toggleResultSelect(id) {
@@ -419,7 +428,7 @@ function atlasApp() {
       const res = await fetch(`/api/results/${r.id}/decide`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ decision, add_to_zotero: addToZotero,
-          collection_key: this.settings.default_collection_key,
+          collection_key: this.settings.import_collection_key || this.settings.default_collection_key,
           inbox_subcollection: this.settings.default_inbox_subcollection,
           tag: this.settings.default_tag })
       });
@@ -435,8 +444,8 @@ function atlasApp() {
       const res = await fetch('/api/results/batch_decide', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ result_ids: this.selectedResultIds, decision,
-          add_to_zotero: addToZotero,
-          collection_key: this.settings.default_collection_key,
+          push_to_zotero: addToZotero,
+          collection_key: this.settings.import_collection_key || this.settings.default_collection_key,
           inbox_subcollection: this.settings.default_inbox_subcollection,
           tag: this.settings.default_tag })
       });
@@ -453,7 +462,7 @@ function atlasApp() {
     async addToZoteroRetro(r) {
       await fetch(`/api/papers/${r.paper_oa_id}/add_to_zotero`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ collection_key: this.settings.default_collection_key,
+        body: JSON.stringify({ collection_key: this.settings.import_collection_key || this.settings.default_collection_key,
           inbox_subcollection: this.settings.default_inbox_subcollection, tag: this.settings.default_tag })
       });
       this.toast('Added to Zotero');

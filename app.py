@@ -65,9 +65,10 @@ _group_lib_locks: dict[str, threading.Lock] = {}
 _group_lib_meta  = threading.Lock()
 
 
-def _get_library_for_group(group_id: str | None, collection_key: str) -> tuple:
+def _get_library_for_group(group_id: str | None, collection_keys: list[str]) -> tuple:
     """Fetch or reuse library data within a simultaneous launch group."""
-    cache_key = f"{group_id}:{collection_key}" if group_id else None
+    key_str   = ",".join(sorted(collection_keys))
+    cache_key = f"{group_id}:{key_str}" if group_id else None
 
     if cache_key:
         # Get-or-create a per-key lock (held by first fetcher, others block on it)
@@ -83,7 +84,7 @@ def _get_library_for_group(group_id: str | None, collection_key: str) -> tuple:
             if cache_key in _group_lib_data:
                 return _group_lib_data[cache_key]
             # We're first — fetch and cache
-            raw   = zc.get_library_items(collection_key)
+            raw   = zc.get_library_items_multi(collection_keys)
             meta  = zc.extract_item_metadata(raw)
             oac.enrich_library_abstracts(meta)
             texts = [f"{m['title']}. {m['abstract']}".strip()
@@ -93,7 +94,7 @@ def _get_library_for_group(group_id: str | None, collection_key: str) -> tuple:
             return meta, texts
 
     # No group — just fetch directly (single run)
-    raw   = zc.get_library_items(collection_key)
+    raw   = zc.get_library_items_multi(collection_keys)
     meta  = zc.extract_item_metadata(raw)
     oac.enrich_library_abstracts(meta)
     texts = [f"{m['title']}. {m['abstract']}".strip()
@@ -181,7 +182,8 @@ def _resolve_lookback(timeframe: str, profile_id: int | None) -> int:
 
 def _claim_for_group(group_id: str, ranked: list) -> list:
     """Atomically claim paper IDs for this group; drops papers already claimed
-    by another worker in the same simultaneous run batch."""
+    by another worker in the same simultaneous run batch.
+    Checks OA ID, DOI, and normalised title for robustness."""
     with _group_lock_meta:
         if group_id not in _group_locks:
             _group_locks[group_id] = threading.Lock()
@@ -192,9 +194,18 @@ def _claim_for_group(group_id: str, ranked: list) -> list:
         for item in ranked:
             _, _, _, paper = item
             oa_id = (paper.get("id") or "").replace("https://openalex.org/", "")
-            if oa_id and oa_id not in seen:
-                seen.add(oa_id)
-                unique.append(item)
+            doi   = (paper.get("doi") or "").replace("https://doi.org/", "").lower().strip()
+            nt    = oac._normalize_title(paper.get("title") or "")
+            if oa_id and oa_id in seen:
+                continue
+            if doi and ("D:" + doi) in seen:
+                continue
+            if len(nt) > 15 and ("T:" + nt) in seen:
+                continue
+            if oa_id: seen.add(oa_id)
+            if doi:   seen.add("D:" + doi)
+            if len(nt) > 15: seen.add("T:" + nt)
+            unique.append(item)
         return unique
 
 
@@ -203,11 +214,14 @@ def _claim_for_group(group_id: str, ranked: list) -> list:
 # ─────────────────────────────────────────────────────────────────────────────
 
 def _run_search_worker(run_id: int, profile: dict, lookback_days: int,
-                        collection_key: str, weight_library: float, weight_feedback: float,
+                        training_collection_keys: list[str],
+                        weight_library: float, weight_feedback: float,
                         user_id: str = "default",
                         group_id: str | None = None) -> None:
     """Runs in a background thread; writes results to DB."""
     db.set_current_user(user_id)   # bind DB to the requesting user
+    # Stable short key for centroid cache file (join sorted collection keys)
+    centroid_key = "|".join(sorted(training_collection_keys)) or "_all_"
 
     def _progress(pct: int, step: str) -> None:
         db.update_run(run_id, progress_pct=pct, progress_step=step)
@@ -217,7 +231,7 @@ def _run_search_worker(run_id: int, profile: dict, lookback_days: int,
         db.update_run(run_id, lookback_days=lookback_days)
 
         # ── 1. Load Zotero library (shared within group) ──────────────────────
-        library_meta, library_texts = _get_library_for_group(group_id, collection_key)
+        library_meta, library_texts = _get_library_for_group(group_id, training_collection_keys)
 
         _progress(15, "2/5\nSearching OpenAlex")
         # ── 2. Fetch candidates via OpenAlex ──────────────────────────────────
@@ -271,7 +285,7 @@ def _run_search_worker(run_id: int, profile: dict, lookback_days: int,
             weight_library=weight_library,
             weight_feedback=weight_feedback,
             threshold=threshold,
-            collection_key=collection_key,
+            collection_key=centroid_key,
             progress_cb=_progress,
             run_id=run_id,
         )
@@ -346,6 +360,7 @@ def api_save_settings():
         "openalex_email", "similarity_threshold", "max_per_condition",
         "default_collection_key", "default_inbox_subcollection",
         "default_tag", "weight_arbitration",
+        "training_collection_keys", "import_collection_key",
         # legacy keys kept for backward compatibility
         "weight_library", "weight_feedback",
     }
@@ -459,9 +474,18 @@ def api_start_run():
         return _err("profile_ids is required", 400)
 
     timeframe: str = data.get("timeframe", "since_last_run")
-    collection_key = data.get("collection_key") or db.get_setting("default_collection_key", "")
-    if not collection_key:
-        return _err("No collection configured – set a working collection in Settings", 400)
+    # training_collection_keys: list of Zotero collection keys to use as training/dedup library.
+    # Empty list = entire library. Falls back to legacy default_collection_key (single key).
+    training_keys_raw = data.get("training_collection_keys")
+    if training_keys_raw is None:
+        stored = db.get_setting("training_collection_keys", None)
+        if stored is not None:
+            training_keys_raw = stored
+        else:
+            # Backward compat: use legacy single key as a one-element list
+            legacy = db.get_setting("default_collection_key", "") or ""
+            training_keys_raw = [legacy] if legacy else []
+    training_collection_keys: list[str] = [k for k in (training_keys_raw or []) if k]
 
     # weight_arbitration: 0.0 = all library, 1.0 = all feedback
     raw_arb = data.get("weight_arbitration")
@@ -489,8 +513,8 @@ def api_start_run():
         )
         t = threading.Thread(
             target=_run_search_worker,
-            args=(run_id, profile, lookback_days, collection_key, weight_library, weight_feedback,
-                  current_user, group_id),
+            args=(run_id, profile, lookback_days, training_collection_keys,
+                  weight_library, weight_feedback, current_user, group_id),
             daemon=True,
         )
         _running[run_id] = t
@@ -587,7 +611,7 @@ def api_decide(result_id: int):
                             raw["_reasons"] = json.loads(rr["match_reasons"] or "[]")
                         except Exception:
                             raw["_reasons"] = []
-                    col_key = data.get("collection_key") or db.get_setting("default_collection_key", "")
+                    col_key = data.get("collection_key") or db.get_setting("import_collection_key") or db.get_setting("default_collection_key", "")
                     inbox = data.get("inbox_subcollection") or db.get_setting("default_inbox_subcollection", "") or None
                     extra_tag = data.get("tag") or db.get_setting("default_tag") or None
                     zotero_keys = zc.add_papers_to_collection([raw], col_key, inbox, extra_tag)
@@ -644,7 +668,7 @@ def api_batch_decide():
     zotero_keys: list[str] = []
     if papers_to_push:
         try:
-            col_key = data.get("collection_key") or db.get_setting("default_collection_key", "")
+            col_key = data.get("collection_key") or db.get_setting("import_collection_key") or db.get_setting("default_collection_key", "")
             inbox = data.get("inbox_subcollection") or db.get_setting("default_inbox_subcollection", "") or None
             extra_tag = data.get("extra_tag") or data.get("tag") or db.get_setting("default_tag") or None
             zotero_keys = zc.add_papers_to_collection(papers_to_push, col_key, inbox, extra_tag)
@@ -666,7 +690,7 @@ def api_add_to_zotero(oa_id: str):
     raw["_combined_score"] = data.get("score")
     raw["_reasons"] = data.get("reasons", [])
 
-    col_key = data.get("collection_key") or db.get_setting("default_collection_key", "")
+    col_key = data.get("collection_key") or db.get_setting("import_collection_key") or db.get_setting("default_collection_key", "")
     inbox = data.get("inbox_subcollection") or db.get_setting("default_inbox_subcollection", "") or None
     extra_tag = data.get("extra_tag") or db.get_setting("default_tag") or None
 
