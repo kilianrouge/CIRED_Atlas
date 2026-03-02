@@ -136,7 +136,7 @@
 
             <div id="conditions-list">
               <template x-for="(cond, idx) in editConditions" :key="cond._id">
-                <div class="condition-row">
+                <div class="condition-row" :class="{'is-scope': cond.scope}">
                   <select class="form-input form-select condition-type-select"
                           x-model="cond.type" @change="onCondTypeChange(cond)">
                     <optgroup label="Text search">
@@ -151,6 +151,10 @@
                     <optgroup label="Classification">
                       <option value="field">Field</option>
                       <option value="domain">Domain</option>
+                    </optgroup>
+                    <optgroup label="Filters (always scope)">
+                      <option value="language">Language</option>
+                      <option value="doc_type">Document type</option>
                     </optgroup>
                     <optgroup label="Library-based">
                       <option value="citing_library">Papers citing my library</option>
@@ -255,8 +259,43 @@
                                min="1" max="20" x-model.number="cond.min_papers">
                       </div>
                     </template>
+
+                    <template x-if="cond.type === 'language'">
+                      <div>
+                        <select class="form-input form-select" x-model="cond.value" @change="conditionsChanged=true">
+                          <option value="any">Any language</option>
+                          <option value="en">English</option>
+                          <option value="fr">French</option>
+                          <option value="es">Spanish</option>
+                          <option value="de">German</option>
+                          <option value="zh">Chinese</option>
+                          <option value="pt">Portuguese</option>
+                          <option value="it">Italian</option>
+                        </select>
+                      </div>
+                    </template>
+
+                    <template x-if="cond.type === 'doc_type'">
+                      <div>
+                        <select class="form-input form-select" x-model="cond.value" @change="conditionsChanged=true">
+                          <option value="any">Any type</option>
+                          <option value="article">Article</option>
+                          <option value="review">Review</option>
+                          <option value="book-chapter">Book chapter</option>
+                          <option value="preprint">Preprint</option>
+                          <option value="book">Book</option>
+                          <option value="dissertation">Dissertation</option>
+                          <option value="dataset">Dataset</option>
+                        </select>
+                      </div>
+                    </template>
                   </div>
 
+                  <button class="condition-scope-btn" :class="{active: cond.scope}"
+                          @click="toggleScope(cond)"
+                          title="Scope: AND-inject this condition into all others (no separate query)">
+                    ∩ scope
+                  </button>
                   <button class="condition-remove-btn" @click="removeCondition(idx)" title="Remove condition">
                     <svg width="14" height="14"><use href="#i-x"/></svg>
                   </button>

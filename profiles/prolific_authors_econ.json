@@ -4,5 +4,17 @@
     "label": "Prolific authors (economics)",
     "min_papers": 3,
     "field": "fields/20"
+  },
+  {
+    "type": "language",
+    "value": "en",
+    "label": "English",
+    "scope": true
+  },
+  {
+    "type": "doc_type",
+    "value": "article",
+    "label": "Article",
+    "scope": true
   }
 ]

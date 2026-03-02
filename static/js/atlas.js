@@ -108,7 +108,9 @@ function atlasApp() {
       this.activeProfile = p;
       const conds = (p.conditions || []).map(c => ({
         ...c, _id: _condId++, _display: c._display || c.value || '',
-        _acItems: [], _acOpen: false, _excludeRaw: (c.exclude_title || []).join(', ')
+        _acItems: [], _acOpen: false, _excludeRaw: (c.exclude_title || []).join(', '),
+        language: c.language || 'en', doc_type: c.doc_type || 'article',
+        scope: c.scope || ['language','doc_type'].includes(c.type),
       }));
       this.editConditions = conds;
       this.editCombinator = p.combinator || 'OR';
@@ -170,7 +172,8 @@ function atlasApp() {
     addCondition() {
       this.editConditions.push({
         _id: _condId++, type: 'keywords_title_abstract',
-        value: '', label: '', _display: '', _acItems: [], _acOpen: false, _excludeRaw: ''
+        value: '', label: '', _display: '', _acItems: [], _acOpen: false, _excludeRaw: '',
+        scope: false
       });
       this.conditionsChanged = true;
     },
@@ -185,6 +188,13 @@ function atlasApp() {
       cond._display = '';
       cond._acItems = [];
       cond.min_papers = cond.min_papers || 3;
+      // language and doc_type are always scope conditions
+      if (['language', 'doc_type'].includes(cond.type)) cond.scope = true;
+      this.conditionsChanged = true;
+    },
+
+    toggleScope(cond) {
+      cond.scope = !cond.scope;
       this.conditionsChanged = true;
     },
 
@@ -195,6 +205,7 @@ function atlasApp() {
         if (c._excludeRaw) out.exclude_title = c._excludeRaw.split(',').map(s => s.trim()).filter(Boolean);
         if (c.type === 'author_in_library') out.min_papers = c.min_papers || 3;
         if (['author','journal','topic'].includes(c.type)) out._display = c._display;
+        if (c.scope) out.scope = true;
         return out;
       });
       const r = await fetch(`/api/profiles/${this.activeProfile.id}`, {
@@ -251,7 +262,7 @@ function atlasApp() {
         return;
       }
       const VALID_TYPES = ['keywords_title_abstract','keywords_title','keywords_abstract',
-        'author','journal','field','domain','citing_library','author_in_library'];
+        'author','journal','field','domain','citing_library','author_in_library','language','doc_type'];
       const imported = [];
       for (const c of parsed) {
         if (!c.type || !VALID_TYPES.includes(c.type)) {
@@ -268,6 +279,7 @@ function atlasApp() {
           _acOpen: false,
           _excludeRaw: (c.exclude_title || []).join(', '),
           min_papers: c.min_papers || 3,
+          scope: c.scope || ['language','doc_type'].includes(c.type),
         });
       }
       this.editConditions = [...this.editConditions, ...imported];
@@ -284,6 +296,7 @@ function atlasApp() {
         if (['author','journal'].includes(c.type) && c._display) out._display = c._display;
         if (c._excludeRaw) out.exclude_title = c._excludeRaw.split(',').map(s => s.trim()).filter(Boolean);
         if (c.type === 'author_in_library' && c.min_papers) out.min_papers = c.min_papers;
+        if (c.scope) out.scope = true;
         return out;
       });
       const text = JSON.stringify(conditions, null, 2);

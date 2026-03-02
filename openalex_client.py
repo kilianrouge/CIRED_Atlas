@@ -61,7 +61,51 @@ def _since_date(lookback_days: int) -> str:
     return (date.today() - timedelta(days=lookback_days)).isoformat()
 
 
-def _paginate(query, max_results: int) -> list[dict]:
+def _lang_type_filter(cond: dict,
+                      default_lang: str = "en",
+                      default_type: str = "article") -> dict:
+    """Return a partial OA filter dict for language and type from a condition."""
+    f: dict = {}
+    lang = cond.get("language", default_lang)
+    if lang and lang != "any":
+        f["language"] = lang
+    doc_type = cond.get("doc_type", default_type)
+    if doc_type and doc_type != "any":
+        f["type"] = doc_type
+    return f
+
+
+def _build_scope_filter(scope_conds: list[dict]) -> dict:
+    """
+    Build an OpenAlex extra_filter dict from conditions marked ``scope: true``.
+    These filters are AND-injected into every non-scope condition's query.
+    Supported scope types: field, domain, journal, language, doc_type.
+    """
+    f: dict = {}
+    for sc in scope_conds:
+        ctype = sc.get("type", "")
+        val   = (sc.get("value") or "").strip()
+        if not val:
+            continue
+        if ctype == "field":
+            f["topics.field.id"] = val
+        elif ctype == "domain":
+            f["topics.domain.id"] = val
+        elif ctype == "journal":
+            f["primary_location.source.id"] = val
+        elif ctype == "keywords_title_abstract":
+            f["title_and_abstract.search"] = val
+        elif ctype == "keywords_title":
+            f["title.search"] = val
+        elif ctype == "language":
+            if val != "any":
+                f["language"] = val
+        elif ctype == "doc_type":
+            if val != "any":
+                f["type"] = val
+    return f
+
+
     results: list[dict] = []
     per_page = min(200, max(1, max_results))
     pager = query.paginate(per_page=per_page, n_max=max_results)
@@ -147,8 +191,7 @@ def _search_keywords_title_abstract(cond: dict, lookback_days: int,
 
     oa_filter: dict = {
         "title_and_abstract.search": value,
-        "language": cond.get("language", "en"),
-        "type": "article",
+        **_lang_type_filter(cond),
         "from_publication_date": _since_date(lookback_days),
         **extra_filter,
     }
@@ -172,8 +215,7 @@ def _search_keywords_title(cond: dict, lookback_days: int,
     extra_filter: dict = cond.get("extra_filter") or {}
     oa_filter: dict = {
         "title.search": value,
-        "language": cond.get("language", "en"),
-        "type": "article",
+        **_lang_type_filter(cond),
         "from_publication_date": _since_date(lookback_days),
         **extra_filter,
     }
@@ -198,8 +240,7 @@ def _search_by_author(cond: dict, lookback_days: int,
     oa_filter = {
         "author.id": author_id,
         "from_publication_date": _since_date(lookback_days),
-        "language": "en",
-        "type": "article",
+        **_lang_type_filter(cond),
         **extra_filter,
     }
     query = Works().filter(**oa_filter).select(_SELECT_FIELDS).sort(publication_date="desc")
@@ -220,8 +261,7 @@ def _search_by_journal(cond: dict, lookback_days: int,
     extra_filter: dict = cond.get("extra_filter") or {}
     oa_filter = {
         "primary_location.source.id": pipe,
-        "language": cond.get("language", "en"),
-        "type": "article",
+        **_lang_type_filter(cond),
         "from_publication_date": _since_date(lookback_days),
         **extra_filter,
     }
@@ -237,11 +277,12 @@ def _search_by_topic(cond: dict, lookback_days: int,
     topic_id: str = cond.get("value", "")
     if not topic_id:
         return []
+    extra_filter: dict = cond.get("extra_filter") or {}
     oa_filter = {
         "topics.id": topic_id,
-        "language": "en",
-        "type": "article",
+        **_lang_type_filter(cond),
         "from_publication_date": _since_date(lookback_days),
+        **extra_filter,
     }
     query = Works().filter(**oa_filter).select(_SELECT_FIELDS).sort(cited_by_count="desc")
     raw = _paginate(query, max_results)
@@ -255,11 +296,12 @@ def _search_by_field(cond: dict, lookback_days: int,
     field_id: str = cond.get("value", "")
     if not field_id:
         return []
+    extra_filter: dict = cond.get("extra_filter") or {}
     oa_filter = {
         "topics.field.id": field_id,
-        "language": "en",
-        "type": "article",
+        **_lang_type_filter(cond),
         "from_publication_date": _since_date(lookback_days),
+        **extra_filter,
     }
     query = Works().filter(**oa_filter).select(_SELECT_FIELDS).sort(cited_by_count="desc")
     raw = _paginate(query, max_results)
@@ -273,11 +315,12 @@ def _search_by_domain(cond: dict, lookback_days: int,
     domain_id: str = cond.get("value", "")
     if not domain_id:
         return []
+    extra_filter: dict = cond.get("extra_filter") or {}
     oa_filter = {
         "topics.domain.id": domain_id,
-        "language": "en",
-        "type": "article",
+        **_lang_type_filter(cond),
         "from_publication_date": _since_date(lookback_days),
+        **extra_filter,
     }
     query = Works().filter(**oa_filter).select(_SELECT_FIELDS).sort(cited_by_count="desc")
     raw = _paginate(query, max_results)
@@ -290,7 +333,9 @@ def _search_citing_library(library_oa_ids: list[str], lookback_days: int,
                             max_per_batch: int = 200,
                             max_results: int = 200,
                             field_id: str | None = None,
-                            domain_id: str | None = None) -> list[dict]:
+                            domain_id: str | None = None,
+                            language: str = "en",
+                            doc_type: str = "article") -> list[dict]:
     """Papers that cite any work currently in the Zotero collection."""
     if not library_oa_ids:
         print("[ATLAS] citing_library: no library OA IDs resolved — skipping")
@@ -310,11 +355,15 @@ def _search_citing_library(library_oa_ids: list[str], lookback_days: int,
         pipe = "|".join(batch)
         for attempt in range(4):
             try:
+                _lt = {}
+                if language and language != "any":
+                    _lt["language"] = language
+                if doc_type and doc_type != "any":
+                    _lt["type"] = doc_type
                 query = Works().filter(**{
                     "cites": pipe,
                     "from_publication_date": _since_date(lookback_days),
-                    "language": "en",
-                    "type": "article",
+                    **_lt,
                     **extra,
                 }).select(_SELECT_FIELDS).sort(publication_date="desc")
                 results = _paginate(query, min(max_per_batch, max_results))
@@ -343,7 +392,9 @@ def _search_prolific_authors(library_oa_ids: list[str],
                               max_per_author: int = 15,
                               max_results: int = 200,
                               field_id: str | None = None,
-                              domain_id: str | None = None) -> list[dict]:
+                              domain_id: str | None = None,
+                              language: str = "en",
+                              doc_type: str = "article") -> list[dict]:
     """Recent papers by authors who have ≥ min_papers in the Zotero collection."""
     # Count author IDs via bulk work fetch
     author_counts: Counter = Counter()
@@ -381,11 +432,15 @@ def _search_prolific_authors(library_oa_ids: list[str],
         if len(all_results) >= max_results * 2:
             break
         try:
+            _lt = {}
+            if language and language != "any":
+                _lt["language"] = language
+            if doc_type and doc_type != "any":
+                _lt["type"] = doc_type
             query = Works().filter(**{
                 "author.id": author_id,
                 "from_publication_date": _since_date(lookback_days),
-                "language": "en",
-                "type": "article",
+                **_lt,
                 **extra,
             }).select(_SELECT_FIELDS).sort(publication_date="desc")
             raw = _paginate(query, capped_per_author)
@@ -538,9 +593,29 @@ def run_profile_search(
     # Pre-resolve library OA IDs once (used by citing / authors handlers)
     library_oa_ids: list[str] | None = None
 
+    # ── Scope: conditions marked scope:true are AND-injected into all others ──
+    scope_conds  = [c for c in conditions if c.get("scope")]
+    run_conds    = [c for c in conditions if not c.get("scope")]
+    scope_ef     = _build_scope_filter(scope_conds)
+    # For citing/authors handlers that accept field_id/domain_id directly
+    scope_field  = next((sc["value"] for sc in scope_conds if sc.get("type") == "field"), None)
+    scope_domain = next((sc["value"] for sc in scope_conds if sc.get("type") == "domain"), None)
+
+    if scope_conds:
+        labels = ", ".join(sc.get("label") or sc.get("type","?") for sc in scope_conds)
+        print(f"[ATLAS] Scope filter active ({labels}): {scope_ef}")
+
+    def _with_scope(cond: dict) -> dict:
+        """Return a shallow copy of cond with scope extra_filter merged in."""
+        if not scope_ef:
+            return cond
+        merged = dict(cond)
+        merged["extra_filter"] = {**scope_ef, **(cond.get("extra_filter") or {})}
+        return merged
+
     # We collect (paper, reason_label) tuples; then merge by oa_id
     collected: dict[str, dict] = {}   # oa_id → paper dict with _reasons list
-    n_total = max(len(conditions), 1)
+    n_total = max(len(run_conds), 1)
     _cb = progress_cb if callable(progress_cb) else lambda *_: None
 
     def _annotate_and_store(papers: list[dict], reason_label: str) -> None:
@@ -556,7 +631,7 @@ def run_profile_search(
                 p["_reasons"] = [reason_label]
                 collected[oa_id] = p
 
-    for cond_idx, cond in enumerate(conditions):
+    for cond_idx, cond in enumerate(run_conds):
         ctype: str = cond.get("type", "")
         label: str = cond.get("label") or ctype
         _cb(20 + round(cond_idx / n_total * 50), f"Cond {cond_idx+1}/{n_total}\n{label}")
@@ -564,43 +639,43 @@ def run_profile_search(
         try:
             if ctype == "keywords_title_abstract":
                 papers = _search_keywords_title_abstract(
-                    cond, lookback_days, seen, existing_dois, existing_oa_ids, max_per_condition
+                    _with_scope(cond), lookback_days, seen, existing_dois, existing_oa_ids, max_per_condition
                 )
                 _annotate_and_store(papers, label)
 
             elif ctype == "keywords_title":
                 papers = _search_keywords_title(
-                    cond, lookback_days, seen, existing_dois, existing_oa_ids, max_per_condition
+                    _with_scope(cond), lookback_days, seen, existing_dois, existing_oa_ids, max_per_condition
                 )
                 _annotate_and_store(papers, label)
 
             elif ctype == "author":
                 papers = _search_by_author(
-                    cond, lookback_days, seen, existing_dois, existing_oa_ids, max_per_condition
+                    _with_scope(cond), lookback_days, seen, existing_dois, existing_oa_ids, max_per_condition
                 )
                 _annotate_and_store(papers, label)
 
             elif ctype == "journal":
                 papers = _search_by_journal(
-                    cond, lookback_days, seen, existing_dois, existing_oa_ids, max_per_condition
+                    _with_scope(cond), lookback_days, seen, existing_dois, existing_oa_ids, max_per_condition
                 )
                 _annotate_and_store(papers, label)
 
             elif ctype == "topic":
                 papers = _search_by_topic(
-                    cond, lookback_days, seen, existing_dois, existing_oa_ids, max_per_condition
+                    _with_scope(cond), lookback_days, seen, existing_dois, existing_oa_ids, max_per_condition
                 )
                 _annotate_and_store(papers, label)
 
             elif ctype == "field":
                 papers = _search_by_field(
-                    cond, lookback_days, seen, existing_dois, existing_oa_ids, max_per_condition
+                    _with_scope(cond), lookback_days, seen, existing_dois, existing_oa_ids, max_per_condition
                 )
                 _annotate_and_store(papers, label)
 
             elif ctype == "domain":
                 papers = _search_by_domain(
-                    cond, lookback_days, seen, existing_dois, existing_oa_ids, max_per_condition
+                    _with_scope(cond), lookback_days, seen, existing_dois, existing_oa_ids, max_per_condition
                 )
                 _annotate_and_store(papers, label)
 
@@ -610,8 +685,10 @@ def run_profile_search(
                 papers = _search_citing_library(
                     library_oa_ids, lookback_days, seen, existing_dois, existing_oa_ids,
                     max_results=max_per_condition,
-                    field_id=cond.get("field"),
-                    domain_id=cond.get("domain"),
+                    field_id=cond.get("field") or scope_field,
+                    domain_id=cond.get("domain") or scope_domain,
+                    language=cond.get("language", "en"),
+                    doc_type=cond.get("doc_type", "article"),
                 )
                 _annotate_and_store(papers, label or "cites my library")
 
@@ -623,8 +700,10 @@ def run_profile_search(
                     library_oa_ids, library_meta, lookback_days, seen,
                     existing_dois, existing_oa_ids, min_papers=min_papers,
                     max_results=max_per_condition,
-                    field_id=cond.get("field"),
-                    domain_id=cond.get("domain"),
+                    field_id=cond.get("field") or scope_field,
+                    domain_id=cond.get("domain") or scope_domain,
+                    language=cond.get("language", "en"),
+                    doc_type=cond.get("doc_type", "article"),
                 )
                 _annotate_and_store(papers, label or f"prolific author (≥{min_papers})")
 

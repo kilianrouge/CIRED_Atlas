@@ -1,0 +1,24 @@
+[
+  {
+    "type": "journal",
+    "value": "S136211407",
+    "label": "Ecological Economics"
+  },
+  {
+    "type": "journal",
+    "value": "S200872515",
+    "label": "Journal of Environmental Economics and Management (JEEM)"
+  },
+  {
+    "type": "language",
+    "value": "en",
+    "label": "English",
+    "scope": true
+  },
+  {
+    "type": "doc_type",
+    "value": "article",
+    "label": "Article",
+    "scope": true
+  }
+]

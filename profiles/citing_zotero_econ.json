@@ -3,5 +3,17 @@
     "type": "citing_library",
     "label": "Citing my library (economics)",
     "field": "fields/20"
+  },
+  {
+    "type": "language",
+    "value": "en",
+    "label": "English",
+    "scope": true
+  },
+  {
+    "type": "doc_type",
+    "value": "article",
+    "label": "Article",
+    "scope": true
   }
 ]

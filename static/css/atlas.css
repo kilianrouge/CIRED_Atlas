@@ -221,8 +221,22 @@ input, select, textarea { font-family: inherit; font-size: 13px; }
   position: relative;
 }
 .condition-row:hover { border-color: var(--blue-400); }
+.condition-row.is-scope {
+  border-color: var(--blue-500);
+  background: var(--blue-50);
+}
+.condition-row.is-scope:hover { border-color: var(--blue-600); }
 .condition-type-select { flex: 0 0 190px; }
 .condition-value-wrap { flex: 1; }
+.condition-scope-btn {
+  flex-shrink: 0; padding: 3px 7px;
+  background: none; border: 1px solid var(--border); color: var(--text-3);
+  cursor: pointer; border-radius: 4px; font-size: 10px; font-weight: 600;
+  letter-spacing: .03em; transition: color .12s, background .12s, border-color .12s;
+  white-space: nowrap;
+}
+.condition-scope-btn:hover { color: var(--blue-700); border-color: var(--blue-400); background: var(--blue-50); }
+.condition-scope-btn.active { color: var(--blue-700); border-color: var(--blue-500); background: var(--blue-100); }
 .condition-remove-btn {
   flex-shrink: 0; padding: 4px 6px;
   background: none; border: none; color: var(--text-3);

@@ -24,6 +24,19 @@
   {
     "type": "field",
     "value": "fields/20",
-    "label": "Economics scope"
+    "label": "Economics scope",
+    "scope": true
+  },
+  {
+    "type": "language",
+    "value": "en",
+    "label": "English",
+    "scope": true
+  },
+  {
+    "type": "doc_type",
+    "value": "article",
+    "label": "Article",
+    "scope": true
   }
 ]
