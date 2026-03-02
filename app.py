@@ -52,6 +52,58 @@ _group_seen:     dict[str, set[str]]       = {}
 _group_locks:    dict[str, threading.Lock] = {}
 _group_lock_meta = threading.Lock()
 
+# Shared library cache for simultaneous runs in the same group+collection.
+# The first worker fetches from Zotero; the rest wait and reuse the result.
+_group_lib_data:  dict[str, tuple] = {}   # key → (library_meta, library_texts)
+_group_lib_locks: dict[str, threading.Lock] = {}
+_group_lib_meta  = threading.Lock()
+
+
+def _get_library_for_group(group_id: str | None, collection_key: str) -> tuple:
+    """Fetch or reuse library data within a simultaneous launch group."""
+    cache_key = f"{group_id}:{collection_key}" if group_id else None
+
+    if cache_key:
+        # Get-or-create a per-key lock (held by first fetcher, others block on it)
+        with _group_lib_meta:
+            if cache_key in _group_lib_data:
+                return _group_lib_data[cache_key]  # already done
+            if cache_key not in _group_lib_locks:
+                _group_lib_locks[cache_key] = threading.Lock()
+            key_lock = _group_lib_locks[cache_key]
+
+        with key_lock:
+            # Re-check after acquiring the lock (another thread may have filled it)
+            if cache_key in _group_lib_data:
+                return _group_lib_data[cache_key]
+            # We're first — fetch and cache
+            raw   = zc.get_library_items(collection_key)
+            meta  = zc.extract_item_metadata(raw)
+            oac.enrich_library_abstracts(meta)
+            texts = [f"{m['title']}. {m['abstract']}".strip()
+                     for m in meta if m.get("title") or m.get("abstract")]
+            _log_library_stats(meta, texts)
+            _group_lib_data[cache_key] = (meta, texts)
+            return meta, texts
+
+    # No group — just fetch directly (single run)
+    raw   = zc.get_library_items(collection_key)
+    meta  = zc.extract_item_metadata(raw)
+    oac.enrich_library_abstracts(meta)
+    texts = [f"{m['title']}. {m['abstract']}".strip()
+             for m in meta if m.get("title") or m.get("abstract")]
+    _log_library_stats(meta, texts)
+    return meta, texts
+
+
+def _log_library_stats(meta: list[dict], texts: list[str]) -> None:
+    total      = len(meta)
+    has_title  = sum(1 for m in meta if m.get("title"))
+    has_abs    = sum(1 for m in meta if m.get("abstract"))
+    full       = sum(1 for m in meta if m.get("title") and m.get("abstract"))
+    print(f"[ATLAS] Library: {total} items | {full} with full content (title+abstract) "
+          f"| {has_title} with title | {has_abs} with abstract | {len(texts)} usable for training")
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # User context (per-request and per-thread)
@@ -103,12 +155,16 @@ def _resolve_lookback(timeframe: str, profile_id: int | None) -> int:
         return MAP[timeframe]
     if timeframe == "since_last_run" and profile_id:
         last = db.get_last_run_date_for_profile(profile_id)
-        if last:
+        if last and last.get("completed_at"):
             try:
-                last_dt = datetime.fromisoformat(last)
-                delta = (datetime.utcnow() - last_dt).days + 1
+                last_dt = datetime.fromisoformat(last["completed_at"])
+                last_lookback = int(last.get("lookback_days") or 0)
+                # Compute the effective from-date of the last run so that
+                # re-running the same day doesn't collapse the window to 1 day.
+                from_date = last_dt - timedelta(days=last_lookback)
+                delta = (datetime.utcnow() - from_date).days + 1
                 return max(1, delta)
-            except ValueError:
+            except (ValueError, TypeError):
                 pass
     return 30  # default: one month
 
@@ -154,14 +210,8 @@ def _run_search_worker(run_id: int, profile: dict, lookback_days: int,
         _progress(3, "1/5\nLoading Zotero library")
         db.update_run(run_id, lookback_days=lookback_days)
 
-        # ── 1. Load Zotero library ────────────────────────────────────────────
-        raw_items = zc.get_library_items(collection_key)
-        library_meta = zc.extract_item_metadata(raw_items)
-        library_texts = [
-            f"{m['title']}. {m['abstract']}".strip()
-            for m in library_meta
-            if m.get("title") or m.get("abstract")
-        ]
+        # ── 1. Load Zotero library (shared within group) ──────────────────────
+        library_meta, library_texts = _get_library_for_group(group_id, collection_key)
 
         _progress(15, "2/5\nSearching OpenAlex")
         # ── 2. Fetch candidates via OpenAlex ──────────────────────────────────
@@ -171,6 +221,7 @@ def _run_search_worker(run_id: int, profile: dict, lookback_days: int,
             conditions, lookback_days, library_meta,
             max_per_condition=max_per,
             progress_cb=_progress,
+            run_id=run_id,
         )
 
         db.update_run(run_id, n_candidates=len(candidates))
@@ -205,14 +256,9 @@ def _run_search_worker(run_id: int, profile: dict, lookback_days: int,
             ]
             db.upsert_paper(oa_id, doi, title, abstract, authors, year, venue, cited, topics, p)
 
-        _progress(85, "4/5\nComputing embeddings")
+        _progress(85, f"4/5\nRanking {len(candidates)} candidates…")
         # ── 4. Rank by similarity ──────────────────────────────────────────────
         threshold = float(db.get_setting("similarity_threshold", 0.0))
-        n_cand    = len(candidates)
-
-        def _emb_progress(cur_batch: int, tot_batches: int) -> None:
-            pct = 85 + round(cur_batch / max(tot_batches, 1) * 9)
-            _progress(pct, f"4/5\nEncoding {cur_batch}/{tot_batches} batches ({n_cand} papers)")
 
         ranked = emb.rank_candidates(
             library_texts, candidates,
@@ -220,7 +266,8 @@ def _run_search_worker(run_id: int, profile: dict, lookback_days: int,
             weight_feedback=weight_feedback,
             threshold=threshold,
             collection_key=collection_key,
-            embed_progress_cb=_emb_progress,
+            progress_cb=_progress,
+            run_id=run_id,
         )
 
         # ── 4b. Cross-run deduplication (within this launch group) ─────────────────
@@ -229,7 +276,7 @@ def _run_search_worker(run_id: int, profile: dict, lookback_days: int,
             ranked = _claim_for_group(group_id, ranked)
             dropped = before - len(ranked)
             if dropped:
-                print(f"[ATLAS] run {run_id}: dropped {dropped} papers already in group")
+                print(f"[run {run_id}] {dropped} paper(s) deduplicated across simultaneous runs")
 
         _progress(95, f"5/5\nSaving {len(ranked)} results")
         # ── 5. Write results ──────────────────────────────────────────────────

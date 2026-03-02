@@ -21,9 +21,14 @@ import database as db
 
 # ── Connection ────────────────────────────────────────────────────────────────
 
+def _ascii(s: str) -> str:
+    """Strip non-ASCII characters (e.g. from rich-text copy-paste) so httpx headers don't crash."""
+    return s.encode("ascii", errors="ignore").decode("ascii").strip()
+
+
 def _zot() -> zotero.Zotero:
-    api_key = db.get_setting("zotero_api_key", "")
-    library_id = db.get_setting("zotero_library_id", "")
+    api_key = _ascii(db.get_setting("zotero_api_key", ""))
+    library_id = _ascii(db.get_setting("zotero_library_id", ""))
     library_type = db.get_setting("zotero_library_type", "user")
     if not api_key or not library_id:
         raise EnvironmentError("Zotero credentials not configured. Go to Settings.")

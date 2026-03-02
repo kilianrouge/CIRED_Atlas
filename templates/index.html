@@ -212,21 +212,29 @@
 
                     <template x-if="cond.type === 'field'">
                       <div>
-                        <select class="form-input form-select" x-model="cond.value">
-                          <option value="">— select a field —</option>
-                          <option value="fields/20">Economics, Econometrics and Finance</option>
-                          <option value="fields/14">Business, Management and Accounting</option>
-                          <option value="fields/33">Social Sciences (broad)</option>
-                          <option value="fields/23">Environmental Science</option>
-                          <option value="fields/22">Engineering</option>
-                          <option value="fields/17">Computer Science</option>
-                          <option value="fields/02">Arts and Humanities</option>
-                          <option value="fields/32">Political Science</option>
-                          <option value="fields/12">Agricultural and Biological Sciences</option>
-                          <option value="fields/19">Earth and Planetary Sciences</option>
-                          <option value="fields/25">Materials Science</option>
-                          <option value="fields/13">Biochemistry, Genetics and Molecular Biology</option>
-                        </select>
+                        <div class="field-checkbox-list">
+                          <template x-for="opt in [
+                            {id:'fields/20', label:'Economics, Econometrics and Finance'},
+                            {id:'fields/14', label:'Business, Management and Accounting'},
+                            {id:'fields/33', label:'Social Sciences (broad)'},
+                            {id:'fields/32', label:'Political Science'},
+                            {id:'fields/23', label:'Environmental Science'},
+                            {id:'fields/19', label:'Earth and Planetary Sciences'},
+                            {id:'fields/12', label:'Agricultural and Biological Sciences'},
+                            {id:'fields/22', label:'Engineering'},
+                            {id:'fields/17', label:'Computer Science'},
+                            {id:'fields/02', label:'Arts and Humanities'},
+                            {id:'fields/25', label:'Materials Science'},
+                            {id:'fields/13', label:'Biochemistry, Genetics and Molecular Biology'}
+                          ]" :key="opt.id">
+                            <label class="field-checkbox-item">
+                              <input type="checkbox"
+                                     :checked="(cond.value||'').split('|').includes(opt.id)"
+                                     @change="toggleFieldValue(cond, opt.id, $event.target.checked)">
+                              <span x-text="opt.label"></span>
+                            </label>
+                          </template>
+                        </div>
                         <input class="form-input mt-1" style="font-size:11px;padding:4px 8px"
                                placeholder="Label (optional)" x-model="cond.label">
                       </div>

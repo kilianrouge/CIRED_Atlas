@@ -33,6 +33,7 @@ _MIGRATIONS = [
 ]
 
 _local = threading.local()
+_default_user: str = "default"  # set at startup; used by threads with no explicit bind
 
 
 def get_db_path(user_id: str) -> Path:
@@ -43,12 +44,14 @@ def get_db_path(user_id: str) -> Path:
 
 
 def set_current_user(user_id: str) -> None:
-    """Bind the current thread to a user's database."""
+    """Bind the current thread (and the module-level fallback) to a user's database."""
+    global _default_user
+    _default_user = user_id
     _local.user_id = user_id
 
 
 def get_current_user() -> str:
-    return getattr(_local, "user_id", "default")
+    return getattr(_local, "user_id", _default_user)
 
 
 def _init_schema(conn: sqlite3.Connection) -> None:
@@ -335,15 +338,15 @@ def delete_run(run_id: int) -> None:
         (cache / f).unlink(missing_ok=True)
 
 
-def get_last_run_date_for_profile(profile_id: int) -> str | None:
-    """Return ISO date string of last completed run for this profile, or None."""
+def get_last_run_date_for_profile(profile_id: int) -> dict | None:
+    """Return {completed_at, lookback_days} of the last completed run for this profile, or None."""
     row = get_connection().execute(
-        """SELECT completed_at FROM search_runs
+        """SELECT completed_at, lookback_days FROM search_runs
            WHERE profile_id=? AND status='done'
            ORDER BY started_at DESC LIMIT 1""",
         (profile_id,),
     ).fetchone()
-    return row["completed_at"] if row else None
+    return dict(row) if row else None
 
 
 # ─────────────────────────────────────────────────────────────────────────────

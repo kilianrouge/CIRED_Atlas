@@ -12,6 +12,7 @@ Falls back to TF-IDF if sentence-transformers is unavailable.
 from __future__ import annotations
 
 import math
+import threading
 import time
 from collections import Counter
 from pathlib import Path
@@ -34,7 +35,8 @@ def _get_model():
     if _model is None:
         try:
             from sentence_transformers import SentenceTransformer
-            _model = SentenceTransformer(_MODEL_NAME)
+            # low_cpu_mem_usage=True (default in ST 4.x) causes "meta tensor" errors on CPU-only
+            _model = SentenceTransformer(_MODEL_NAME, model_kwargs={"low_cpu_mem_usage": False})
         except Exception as exc:
             print(f"[ATLAS embeddings] Model unavailable: {exc}. Using TF-IDF fallback.")
             _model = False
@@ -109,6 +111,11 @@ def _tfidf_cosine(lib_texts: list[str], candidate_texts: list[str]) -> "np.ndarr
 
 # ── Centroid helpers ──────────────────────────────────────────────────────────
 
+# Per-cache-file locks: prevent simultaneous threads rebuilding the same centroid
+_centroid_locks: dict[str, threading.Lock] = {}
+_centroid_lock_meta = threading.Lock()
+
+
 def _mean_centroid(vecs: "np.ndarray") -> "np.ndarray":
     c = vecs.mean(axis=0)
     norm = np.linalg.norm(c)
@@ -117,27 +124,50 @@ def _mean_centroid(vecs: "np.ndarray") -> "np.ndarray":
     return c
 
 
-def _build_centroid_cached(texts: list[str], cache_path: Path, max_age_h: float = 12.0) -> "np.ndarray | None":
-    if cache_path.exists():
-        age_h = (time.time() - cache_path.stat().st_mtime) / 3600
-        if age_h < max_age_h:
-            return np.load(str(cache_path))
-    if not texts:
-        return None
-    vecs = _embed(texts)
-    if vecs is None:
-        return None
-    centroid = _mean_centroid(vecs)
-    np.save(str(cache_path), centroid)
-    return centroid
+def _build_centroid_cached(texts: list[str], cache_path: Path, max_age_h: float = 12.0,
+                            progress_cb=None, log_label: str | None = None) -> "np.ndarray | None":
+    # Per-path lock: prevents simultaneous threads from all rebuilding the same centroid
+    path_key = str(cache_path)
+    with _centroid_lock_meta:
+        if path_key not in _centroid_locks:
+            _centroid_locks[path_key] = threading.Lock()
+        lock = _centroid_locks[path_key]
+
+    with lock:
+        if cache_path.exists():
+            age_h = (time.time() - cache_path.stat().st_mtime) / 3600
+            if age_h < max_age_h:
+                return np.load(str(cache_path))
+        if not texts:
+            return None
+        vecs = _embed(texts, progress_cb=progress_cb)
+        if vecs is None:
+            return None
+        centroid = _mean_centroid(vecs)
+        np.save(str(cache_path), centroid)
+        # Log cohesion stats so we know how tight the embedding cluster is
+        if log_label:
+            sims = (vecs @ centroid).tolist()
+            n = len(sims)
+            mean_s = sum(sims) / n
+            min_s  = min(sims)
+            max_s  = max(sims)
+            sorted_s = sorted(sims)
+            med_s  = sorted_s[n // 2]
+            model_name = _MODEL_NAME if _get_model() is not None else "TF-IDF"
+            print(f"[ATLAS] {log_label} centroid built ({model_name}, {n} items) "
+                  f"| cosine to centroid: mean={mean_s:.3f} median={med_s:.3f} "
+                  f"min={min_s:.3f} max={max_s:.3f}")
+        return centroid
 
 
 def build_library_centroid(library_texts: list[str], collection_key: str = "default",
-                            force: bool = False) -> "np.ndarray | None":
+                            force: bool = False, progress_cb=None) -> "np.ndarray | None":
     cache_path = _CACHE_DIR / f"centroid_lib_{collection_key}.npy"
     if force and cache_path.exists():
         cache_path.unlink()
-    return _build_centroid_cached(library_texts, cache_path, max_age_h=12.0)
+    return _build_centroid_cached(library_texts, cache_path, max_age_h=12.0,
+                                   progress_cb=progress_cb, log_label="Library")
 
 
 def build_feedback_centroids(force: bool = False) -> "tuple[np.ndarray | None, np.ndarray | None]":
@@ -153,8 +183,10 @@ def build_feedback_centroids(force: bool = False) -> "tuple[np.ndarray | None, n
             if p.exists():
                 p.unlink()
 
-    acc_centroid = _build_centroid_cached(accepted_texts, acc_path, max_age_h=2.0) if accepted_texts else None
-    rej_centroid = _build_centroid_cached(rejected_texts, rej_path, max_age_h=2.0) if rejected_texts else None
+    acc_centroid = _build_centroid_cached(accepted_texts, acc_path, max_age_h=2.0,
+                                           log_label="Accepted feedback") if accepted_texts else None
+    rej_centroid = _build_centroid_cached(rejected_texts, rej_path, max_age_h=2.0,
+                                           log_label="Rejected feedback") if rejected_texts else None
     return acc_centroid, rej_centroid
 
 
@@ -167,7 +199,8 @@ def rank_candidates(
     weight_feedback: float = 0.3,
     threshold: float = 0.0,
     collection_key: str = "default",
-    embed_progress_cb=None,
+    progress_cb=None,  # callable(pct: int, text: str) — same signature as _progress in app.py
+    run_id: int | None = None,
 ) -> list[tuple[float, float, float, dict]]:
     """
     Score and rank candidate papers.
@@ -183,16 +216,34 @@ def rank_candidates(
         for p in candidates
     ]
 
+    n_lib  = len(library_texts)
+    n_cand = len(candidates)
+    _batch = 32  # must match batch_size used in _embed
+
+    def _lib_progress(cur: int, tot: int) -> None:
+        if progress_cb:
+            papers_done = min(cur * _batch, n_lib)
+            progress_cb(85 + round(cur / max(tot, 1) * 4),
+                        f"4/5\nEmbedding library: {papers_done}/{n_lib} papers")
+
+    def _cand_progress(cur: int, tot: int) -> None:
+        if progress_cb:
+            papers_done = min(cur * _batch, n_cand)
+            progress_cb(89 + round(cur / max(tot, 1) * 5),
+                        f"4/5\nEmbedding papers: {papers_done}/{n_cand} papers")
+
     # ── Library similarity ────────────────────────────────────────────────────
     use_neural = _get_model() is not None
 
     if use_neural and library_texts:
-        lib_centroid = build_library_centroid(library_texts, collection_key)
+        lib_centroid = build_library_centroid(library_texts, collection_key,
+                                              progress_cb=_lib_progress)
     else:
         lib_centroid = None
 
+    cand_vecs = None
     if lib_centroid is not None:
-        cand_vecs = _embed(candidate_texts, progress_cb=embed_progress_cb)
+        cand_vecs = _embed(candidate_texts, progress_cb=_cand_progress)
         if cand_vecs is not None:
             scores_lib = (cand_vecs @ lib_centroid).tolist()
         else:
@@ -207,7 +258,8 @@ def rank_candidates(
     acc_centroid, rej_centroid = build_feedback_centroids()
 
     if use_neural and (acc_centroid is not None or rej_centroid is not None):
-        cand_vecs = cand_vecs if "cand_vecs" in dir() else _embed(candidate_texts)
+        if cand_vecs is None:
+            cand_vecs = _embed(candidate_texts)
         if cand_vecs is not None:
             scores_acc = (cand_vecs @ acc_centroid).tolist() if acc_centroid is not None else [0.0] * len(candidates)
             scores_rej = (cand_vecs @ rej_centroid).tolist() if rej_centroid is not None else [0.0] * len(candidates)
@@ -234,6 +286,17 @@ def rank_candidates(
             ranked.append((combined, sl, sf, paper))
 
     ranked.sort(key=lambda x: x[0], reverse=True)
+
+    # ── Summary log ──────────────────────────────────────────────────────────
+    _tag = f"[run {run_id}]" if run_id is not None else "[ATLAS]"
+    method = "neural (mxbai)" if use_neural and cand_vecs is not None else "TF-IDF"
+    if ranked:
+        scores = [r[0] for r in ranked]
+        print(f"{_tag} Embedding done ({method}): {len(ranked)}/{len(candidates)} above threshold "
+              f"| top={scores[0]:.3f} median={scores[len(scores)//2]:.3f} min={scores[-1]:.3f}")
+    else:
+        print(f"{_tag} Embedding done ({method}): 0 candidates above threshold={threshold}")
+
     return ranked
 
 

@@ -241,6 +241,18 @@ function atlasApp() {
       this.conditionsChanged = true;
     },
 
+    toggleFieldValue(cond, id, checked) {
+      const current = (cond.value || '').split('|').filter(v => v);
+      if (checked) {
+        if (!current.includes(id)) current.push(id);
+      } else {
+        const idx = current.indexOf(id);
+        if (idx >= 0) current.splice(idx, 1);
+      }
+      cond.value = current.join('|');
+      this.conditionsChanged = true;
+    },
+
     // ── Import / Export conditions JSON ──────────────────────────────────
     importConditionsModal() {
       this.importJson = '';

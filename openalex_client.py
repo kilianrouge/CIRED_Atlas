@@ -43,6 +43,9 @@ warnings.filterwarnings("ignore", category=DeprecationWarning)
 def _configure_pyalex() -> None:
     email = db.get_setting("openalex_email", "")
     if email:
+        # httpx encodes headers as ASCII; strip/replace any non-ASCII chars
+        email = email.encode("ascii", errors="ignore").decode("ascii").strip()
+    if email:
         pyalex.config.email = email
     pyalex.config.max_retries = 0   # we implement our own backoff
 
@@ -58,7 +61,10 @@ _SELECT_FIELDS = [
 # ─────────────────────────────────────────────────────────────────────────────
 
 def _since_date(lookback_days: int) -> str:
-    return (date.today() - timedelta(days=lookback_days)).isoformat()
+    # Add a 2-day grace buffer so papers at the exact edge of the window aren't missed
+    # (e.g. a paper published exactly `lookback_days` ago would otherwise be excluded
+    # since OA uses strict >= on from_publication_date).
+    return (date.today() - timedelta(days=lookback_days + 2)).isoformat()
 
 
 def _lang_type_filter(cond: dict,
@@ -106,6 +112,7 @@ def _build_scope_filter(scope_conds: list[dict]) -> dict:
     return f
 
 
+def _paginate(query, max_results: int) -> list[dict]:
     results: list[dict] = []
     per_page = min(200, max(1, max_results))
     pager = query.paginate(per_page=per_page, n_max=max_results)
@@ -338,11 +345,10 @@ def _search_citing_library(library_oa_ids: list[str], lookback_days: int,
                             doc_type: str = "article") -> list[dict]:
     """Papers that cite any work currently in the Zotero collection."""
     if not library_oa_ids:
-        print("[ATLAS] citing_library: no library OA IDs resolved — skipping")
         return []
-    print(f"[ATLAS] citing_library: searching cites for {len(library_oa_ids)} library works")
     all_results: list[dict] = []
     batch_size = 50
+    n_batches = 0
     extra: dict = {}
     if field_id:
         extra["topics.field.id"] = field_id
@@ -367,19 +373,17 @@ def _search_citing_library(library_oa_ids: list[str], lookback_days: int,
                     **extra,
                 }).select(_SELECT_FIELDS).sort(publication_date="desc")
                 results = _paginate(query, min(max_per_batch, max_results))
-                print(f"[ATLAS] citing_library batch {i//batch_size+1}: {len(results)} results")
                 all_results.extend(results)
+                n_batches += 1
                 time.sleep(0.5)
                 break
             except Exception as exc:
                 if "429" in str(exc) or "too many" in str(exc).lower():
-                    print(f"[ATLAS] citing_library rate-limited, backing off (attempt {attempt+1})")
                     time.sleep(15 * (2 ** attempt))
                 else:
-                    print(f"[ATLAS] citing_library batch error: {exc}")
                     break
-    print(f"[ATLAS] citing_library total before dedup: {len(all_results)}")
-    return _deduplicate(all_results, seen, existing_dois, existing_oa_ids)[:max_results]
+    out = _deduplicate(all_results, seen, existing_dois, existing_oa_ids)[:max_results]
+    return out
 
 
 def _search_prolific_authors(library_oa_ids: list[str],
@@ -455,14 +459,12 @@ def _search_prolific_authors(library_oa_ids: list[str],
 # Resolve DOIs to OpenAlex IDs (for citing / authors searches)
 # ─────────────────────────────────────────────────────────────────────────────
 
-def resolve_library_oa_ids(library_meta: list[dict]) -> list[str]:
+def resolve_library_oa_ids(library_meta: list[dict], _tag: str = "[ATLAS]") -> list[str]:
     """Return all OpenAlex Work IDs for the library items."""
     known = {m["openalex_id"] for m in library_meta if m.get("openalex_id")}
     resolved: set[str] = set(known)
-    print(f"[ATLAS] resolve_library_oa_ids: {len(known)} known OA IDs from Zotero extra fields")
 
     dois = [m["doi"] for m in library_meta if m.get("doi") and not m.get("openalex_id")]
-    print(f"[ATLAS] resolve_library_oa_ids: resolving {len(dois)} DOIs via OpenAlex")
     for i in range(0, len(dois), 50):
         batch = dois[i: i + 50]
         doi_filter = "|".join(batch)
@@ -475,9 +477,9 @@ def resolve_library_oa_ids(library_meta: list[dict]) -> list[str]:
                         resolved.add(oa_id)
             time.sleep(0.2)
         except Exception as exc:
-            print(f"[ATLAS] resolve_library_oa_ids DOI batch error: {exc}")
+            print(f"{_tag} resolve OA IDs error: {exc}")
 
-    print(f"[ATLAS] resolve_library_oa_ids: total resolved = {len(resolved)}")
+    print(f"{_tag} Library: {len(resolved)} OA IDs resolved ({len(known)} from Zotero, {len(resolved)-len(known)} via DOI lookup)")
     return list(resolved)
 
 
@@ -563,6 +565,82 @@ def autocomplete_topics(q: str, limit: int = 10) -> list[dict]:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Library abstract enrichment
+# ─────────────────────────────────────────────────────────────────────────────
+
+def enrich_library_abstracts(meta: list[dict], batch_size: int = 50) -> list[dict]:
+    """
+    For library items that have no abstract, fetch it from OpenAlex using
+    the item's DOI or OpenAlex ID.  Items are mutated in-place and returned.
+    Works in batches of up to `batch_size` items per OpenAlex request.
+    """
+    _configure_pyalex()
+
+    # Track how many already had abstracts before we start
+    had_abstract_before = sum(1 for m in meta if m.get("abstract"))
+
+    # Separate items that need enrichment, keyed for fast lookup
+    by_oa_id: dict[str, dict] = {}
+    by_doi:   dict[str, dict] = {}
+    for m in meta:
+        if m.get("abstract"):
+            continue
+        if m.get("openalex_id"):
+            by_oa_id[m["openalex_id"]] = m
+        elif m.get("doi"):
+            by_doi[m["doi"]] = m
+
+    def _fill(works: list[dict]) -> None:
+        for w in works:
+            oa_id = (w.get("id") or "").replace("https://openalex.org/", "")
+            doi   = (w.get("doi") or "").replace("https://doi.org/", "").lower().strip()
+            abstract = reconstruct_abstract(w)
+            if not abstract:
+                continue
+            if oa_id in by_oa_id:
+                by_oa_id[oa_id]["abstract"] = abstract
+                # Also set openalex_id in case item was matched by DOI
+                by_oa_id[oa_id].setdefault("openalex_id", oa_id)
+            if doi in by_doi:
+                by_doi[doi]["abstract"] = abstract
+                by_doi[doi].setdefault("openalex_id", oa_id)
+
+    # Fetch by OA ID in batches
+    oa_ids = list(by_oa_id.keys())
+    for i in range(0, len(oa_ids), batch_size):
+        batch = oa_ids[i: i + batch_size]
+        try:
+            works = _get_with_backoff(
+                Works().filter(openalex_id="|".join(batch))
+                       .select(["id", "doi", "abstract_inverted_index"]),
+                per_page=batch_size,
+            )
+            _fill(works)
+        except Exception as exc:
+            print(f"[ATLAS] enrich_library_abstracts (oa_id batch): {exc}")
+
+    # Fetch by DOI in batches (only items not already resolved above)
+    remaining_dois = [doi for doi, m in by_doi.items() if not m.get("abstract")]
+    for i in range(0, len(remaining_dois), batch_size):
+        batch = remaining_dois[i: i + batch_size]
+        try:
+            works = _get_with_backoff(
+                Works().filter(doi="|".join(batch))
+                       .select(["id", "doi", "abstract_inverted_index"]),
+                per_page=batch_size,
+            )
+            _fill(works)
+        except Exception as exc:
+            print(f"[ATLAS] enrich_library_abstracts (doi batch): {exc}")
+
+    filled   = sum(1 for m in meta if m.get("abstract"))
+    total    = len(meta)
+    enriched = filled - had_abstract_before
+    print(f"[ATLAS] Abstracts: {filled}/{total} library items have an abstract ({enriched} fetched from OpenAlex)")
+    return meta
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Main entry point: run all conditions for a profile
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -572,6 +650,7 @@ def run_profile_search(
     library_meta: list[dict],
     max_per_condition: int = 150,
     progress_cb=None,
+    run_id: int | None = None,
 ) -> list[dict]:
     """
     Execute all conditions in a profile and return a deduplicated list of
@@ -585,6 +664,8 @@ def run_profile_search(
         progress_cb     optional callable(pct: int, step: str) for progress reporting
     """
     _configure_pyalex()
+
+    _tag = f"[run {run_id}]" if run_id is not None else "[ATLAS]"
 
     existing_dois = {m["doi"] for m in library_meta if m.get("doi")}
     existing_oa_ids = {m["openalex_id"] for m in library_meta if m.get("openalex_id")}
@@ -601,9 +682,10 @@ def run_profile_search(
     scope_field  = next((sc["value"] for sc in scope_conds if sc.get("type") == "field"), None)
     scope_domain = next((sc["value"] for sc in scope_conds if sc.get("type") == "domain"), None)
 
+    scope_summary = ""
     if scope_conds:
         labels = ", ".join(sc.get("label") or sc.get("type","?") for sc in scope_conds)
-        print(f"[ATLAS] Scope filter active ({labels}): {scope_ef}")
+        scope_summary = f" | scope: {labels}"
 
     def _with_scope(cond: dict) -> dict:
         """Return a shallow copy of cond with scope extra_filter merged in."""
@@ -612,6 +694,8 @@ def run_profile_search(
         merged = dict(cond)
         merged["extra_filter"] = {**scope_ef, **(cond.get("extra_filter") or {})}
         return merged
+
+    print(f"{_tag} Starting search: {len(run_conds)} condition(s), {lookback_days}d lookback{scope_summary}")
 
     # We collect (paper, reason_label) tuples; then merge by oa_id
     collected: dict[str, dict] = {}   # oa_id → paper dict with _reasons list
@@ -636,6 +720,7 @@ def run_profile_search(
         label: str = cond.get("label") or ctype
         _cb(20 + round(cond_idx / n_total * 50), f"Cond {cond_idx+1}/{n_total}\n{label}")
 
+        papers: list[dict] = []
         try:
             if ctype == "keywords_title_abstract":
                 papers = _search_keywords_title_abstract(
@@ -681,7 +766,7 @@ def run_profile_search(
 
             elif ctype == "citing_library":
                 if library_oa_ids is None:
-                    library_oa_ids = resolve_library_oa_ids(library_meta)
+                    library_oa_ids = resolve_library_oa_ids(library_meta, _tag)
                 papers = _search_citing_library(
                     library_oa_ids, lookback_days, seen, existing_dois, existing_oa_ids,
                     max_results=max_per_condition,
@@ -694,7 +779,7 @@ def run_profile_search(
 
             elif ctype == "author_in_library":
                 if library_oa_ids is None:
-                    library_oa_ids = resolve_library_oa_ids(library_meta)
+                    library_oa_ids = resolve_library_oa_ids(library_meta, _tag)
                 min_papers = int(cond.get("min_papers") or 3)
                 papers = _search_prolific_authors(
                     library_oa_ids, library_meta, lookback_days, seen,
@@ -708,14 +793,15 @@ def run_profile_search(
                 _annotate_and_store(papers, label or f"prolific author (≥{min_papers})")
 
             elif ctype == "zotero_collection":
-                # Papers from a specific sub-collection — already in library so skip searching;
-                # this condition type is handled upstream in the search orchestrator
                 pass
 
-        except Exception as exc:
-            # Don't kill entire search if one condition fails
-            import traceback
-            print(f"[ATLAS] Condition '{label}' failed: {exc}\n{traceback.format_exc()}")
+            print(f"{_tag} Cond {cond_idx+1}/{n_total} '{label}': {len(papers)} papers")
 
+        except Exception as exc:
+            import traceback
+            print(f"{_tag} Cond '{label}' FAILED: {exc}\n{traceback.format_exc()}")
+            papers = []
+
+    print(f"{_tag} Search done: {len(collected)} unique candidates")
     _cb(72, f"OpenAlex search complete — {len(collected)} candidates")
     return list(collected.values())

@@ -1,8 +1,7 @@
 [
   {
     "type": "citing_library",
-    "label": "Citing my library (economics)",
-    "field": "fields/20"
+    "label": "Citing my library"
   },
   {
     "type": "language",
