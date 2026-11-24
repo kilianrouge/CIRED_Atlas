@@ -372,6 +372,7 @@ function atlasApp() {
           qrun.status = data.status;
           qrun.progress_pct  = data.progress_pct  || 0;
           qrun.progress_step = data.progress_step || '';
+          qrun.error_msg     = data.error_msg     || '';  // on a 'done' run: degraded-ranking warning
           if (data.status === 'done' || data.status === 'error') {
             this.runningProfileIds = this.runningProfileIds.filter(id => id !== qrun.profile_id);
             if (data.status === 'done') {

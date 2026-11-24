@@ -670,6 +670,7 @@ def run_profile_search(
     max_per_condition: int = 150,
     progress_cb=None,
     run_id: int | None = None,
+    extra_exclude_oa_ids: set[str] | None = None,
 ) -> list[dict]:
     """
     Execute all conditions in a profile and return a deduplicated list of
@@ -688,6 +689,9 @@ def run_profile_search(
 
     existing_dois   = {m["doi"] for m in library_meta if m.get("doi")}
     existing_oa_ids = {m["openalex_id"] for m in library_meta if m.get("openalex_id")}
+    # Also exclude papers already shown in previous runs for this profile
+    if extra_exclude_oa_ids:
+        existing_oa_ids.update(extra_exclude_oa_ids)
     seen: set[str] = set()
     # Pre-populate `seen` with normalised library titles so that papers already
     # in the library are excluded even when the OA-ID / DOI doesn't match.

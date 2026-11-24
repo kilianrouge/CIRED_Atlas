@@ -243,11 +243,15 @@ def _run_search_worker(run_id: int, profile: dict, lookback_days: int,
         # ── 2. Fetch candidates via OpenAlex ──────────────────────────────────
         conditions: list[dict] = profile.get("conditions", [])
         max_per = db.get_setting("max_per_condition", 30)
+        # Exclude papers already shown in previous completed runs for this profile
+        # so they don't re-appear when using a broad lookback window (e.g. since_last_run).
+        prev_seen_oa_ids = db.get_seen_paper_oa_ids_for_profile(profile["id"])
         candidates = oac.run_profile_search(
             conditions, lookback_days, library_meta,
             max_per_condition=max_per,
             progress_cb=_progress,
             run_id=run_id,
+            extra_exclude_oa_ids=prev_seen_oa_ids,
         )
 
         db.update_run(run_id, n_candidates=len(candidates))
@@ -286,6 +290,7 @@ def _run_search_worker(run_id: int, profile: dict, lookback_days: int,
         # ── 4. Rank by similarity ──────────────────────────────────────────────
         threshold = float(db.get_setting("similarity_threshold", 0.0))
 
+        rank_info: dict = {}
         ranked = emb.rank_candidates(
             library_texts, candidates,
             weight_library=weight_library,
@@ -294,7 +299,9 @@ def _run_search_worker(run_id: int, profile: dict, lookback_days: int,
             collection_key=centroid_key,
             progress_cb=_progress,
             run_id=run_id,
+            info=rank_info,
         )
+        degraded = rank_info.get("method") != "neural"
 
         # ── 4b. Cross-run deduplication (within this launch group) ─────────────────
         if group_id and ranked:
@@ -311,8 +318,14 @@ def _run_search_worker(run_id: int, profile: dict, lookback_days: int,
             reasons = paper.get("_reasons", [])
             db.add_run_result(run_id, oa_id, sl, sf, combined, reasons)
 
+        # A degraded (TF-IDF) ranking is flagged on the run: error_msg on a 'done' run is
+        # shown as a warning badge in the UI instead of failing silently.
         db.update_run(run_id, status="done", n_results=len(ranked),
-                      progress_pct=100, progress_step=f"Done\n{len(ranked)} papers found",
+                      progress_pct=100,
+                      progress_step=f"Done\n{len(ranked)} papers found"
+                                    + (" (TF-IDF fallback)" if degraded else ""),
+                      error_msg=("Ranking used the TF-IDF fallback, neural model unavailable: "
+                                 + str(rank_info.get("error")))[:500] if degraded else None,
                       completed_at=datetime.utcnow().isoformat())
 
     except Exception as exc:
@@ -599,9 +612,6 @@ def api_decide(result_id: int):
             title = paper.get("title") if paper else None
             abstract = paper.get("abstract") if paper else None
             db.record_decision(oa_id, decision, run_id, title, abstract)
-            _cache = Path(__file__).parent / "cache"
-            for _f in ("centroid_accepted.npy", "centroid_rejected.npy"):
-                (_cache / _f).unlink(missing_ok=True)
 
             # Optionally push to Zotero
             if data.get("add_to_zotero") and decision == "accepted" and paper:
@@ -666,10 +676,6 @@ def api_batch_decide():
                         except Exception:
                             raw["_reasons"] = []
                     papers_to_push.append(raw)
-
-    _cache = Path(__file__).parent / "cache"
-    for _f in ("centroid_accepted.npy", "centroid_rejected.npy"):
-        (_cache / _f).unlink(missing_ok=True)
 
     zotero_keys: list[str] = []
     if papers_to_push:
@@ -767,5 +773,8 @@ def _open_browser():
 
 
 if __name__ == "__main__":
+    # Load the embedding model now (not at the first run) so a broken install shows up
+    # immediately in the console, and the first search doesn't pay the loading time.
+    threading.Thread(target=emb.warm_up, daemon=True).start()
     print(f"[ATLAS] listening on http://{HOST}:{PORT}  (SSH tunnel: localhost:{PORT})")
     app.run(host=HOST, port=PORT, debug=False, use_reloader=False, threaded=True)

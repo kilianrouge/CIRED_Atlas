@@ -409,15 +409,12 @@ def list_runs(limit: int = 50) -> list[dict]:
 def delete_run(run_id: int) -> None:
     """Delete a run, its results (CASCADE), and paper_decisions from this run.
     Removes the run from training memory so its papers can reappear in future
-    searches and won't bias the feedback centroid.
+    searches and won't bias the feedback scores.
     """
     with transaction() as conn:
         conn.execute("DELETE FROM paper_decisions WHERE run_id=?", (run_id,))
         conn.execute("DELETE FROM search_runs WHERE id=?", (run_id,))
-    # Invalidate embedding caches
-    cache = Path(__file__).parent / "cache"
-    for f in ("centroid_accepted.npy", "centroid_rejected.npy"):
-        (cache / f).unlink(missing_ok=True)
+    # No cache to invalidate: feedback vectors are cached by text hash (embeddings.py)
 
 
 def get_last_run_date_for_profile(profile_id: int) -> dict | None:
@@ -429,6 +426,19 @@ def get_last_run_date_for_profile(profile_id: int) -> dict | None:
         (profile_id,),
     ).fetchone()
     return dict(row) if row else None
+
+
+def get_seen_paper_oa_ids_for_profile(profile_id: int) -> set[str]:
+    """Return OA IDs of every paper already shown in a completed run for this profile.
+    Used to prevent the same papers from re-appearing in subsequent searches."""
+    rows = get_connection().execute(
+        """SELECT DISTINCT rr.paper_oa_id
+           FROM run_results rr
+           JOIN search_runs sr ON sr.id = rr.run_id
+           WHERE sr.profile_id=? AND sr.status='done'""",
+        (profile_id,),
+    ).fetchall()
+    return {row["paper_oa_id"] for row in rows}
 
 
 # ─────────────────────────────────────────────────────────────────────────────

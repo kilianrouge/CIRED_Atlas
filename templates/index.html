@@ -407,8 +407,9 @@
                     <span class="text-muted" style="flex:1;font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"
                           x-text="run.status==='running' ? ((run.progress_step||'Running…').split('\n')[1]||'') : ''"></span>
                     <span class="badge"
-                          :class="run.status==='done'?'badge-green':run.status==='error'?'badge-red':'badge-blue'"
-                          x-text="run.status==='done'?(run.n_results||0)+' results':run.status==='error'?'error':(run.progress_step||'…').split('\n')[0]"></span>
+                          :class="run.status==='done'?(run.error_msg?'badge-amber':'badge-green'):run.status==='error'?'badge-red':'badge-blue'"
+                          :title="run.error_msg||''"
+                          x-text="run.status==='done'?(run.n_results||0)+' results'+(run.error_msg?' · ⚠ TF-IDF fallback':''):run.status==='error'?'error':(run.progress_step||'…').split('\n')[0]"></span>
                   </div>
                   <div class="progress-bar-wrap">
                     <div class="progress-bar-inner"
@@ -662,8 +663,9 @@
                 <div style="display:flex;gap:3px;flex-wrap:wrap;align-items:center">
                   <template x-for="run in group.runs" :key="run.id">
                     <span class="badge"
-                          :class="run.status==='done'?'badge-green':run.status==='error'?'badge-red':'badge-amber'"
-                          x-text="group.runs.length > 1 ? (run.profile_name||'?') : run.status"></span>
+                          :class="run.status==='done'?(run.error_msg?'badge-amber':'badge-green'):run.status==='error'?'badge-red':'badge-amber'"
+                          :title="run.error_msg||''"
+                          x-text="(group.runs.length > 1 ? (run.profile_name||'?') : run.status) + (run.status==='done'&&run.error_msg?' ⚠':'')"></span>
                   </template>
                 </div>
                 <button class="btn btn-ghost btn-sm" style="color:#dc2626;padding:2px 6px;flex-shrink:0"
